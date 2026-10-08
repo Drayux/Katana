@@ -283,7 +283,9 @@ static void detailed_timer_draw(LSComponent* self_, const ls_game* game, const l
         }
     }
 
-    ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(ls_timer_get_time(timer, true), self->comparison_method));
+    ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(
+			ls_timer_get_time(timer, true),
+			self->comparison_method));
 	if (self->precision == 0) {
 		ms_str[0] = '\0';
 	} else {
@@ -294,20 +296,17 @@ static void detailed_timer_draw(LSComponent* self_, const ls_game* game, const l
     gtk_label_set_text(GTK_LABEL(self->time_millis), ms_str);
 
 	if (self->segment) {
-		if (timer->curr_split == 0) {
-			gtk_label_set_text(GTK_LABEL(self->time_seconds), time_str);
-			gtk_label_set_text(GTK_LABEL(self->time_millis), ms_str);
+		ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(
+				timer->segment_times[timer->curr_split],
+				self->comparison_method));
+		if (self->segment_precision == 0) {
+			ms_str[0] = '\0';
 		} else {
-			ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(ls_timer_get_time(timer, true), self->comparison_method));
-			if (self->segment_precision == 0) {
-				ms_str[0] = '\0';
-			} else {
-				ms_str[0] = '.';
-				ms_str[self->segment_precision + 1] = '\0';
-			}
-			gtk_label_set_text(GTK_LABEL(self->segment_seconds), time_str);
-			gtk_label_set_text(GTK_LABEL(self->segment_millis), ms_str);
+			ms_str[0] = '.';
+			ms_str[self->segment_precision + 1] = '\0';
 		}
+		gtk_label_set_text(GTK_LABEL(self->segment_seconds), time_str);
+		gtk_label_set_text(GTK_LABEL(self->segment_millis), ms_str);
 	}
 
 	if (self->segment_info) {

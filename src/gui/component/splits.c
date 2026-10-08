@@ -3,6 +3,9 @@
  * Implementation of the splits component.
  */
 #include "components.h"
+
+#include "../../logging.h"
+
 #include <gtk/gtk.h>
 #include <limits.h>
 
@@ -59,6 +62,11 @@ LSComponent* ls_component_splits_new(json_t* config)
 {
     LSSplits* self;
 
+    struct {
+        bool pin_final;
+		// bool reverse
+    } opt = { 0 };
+
     self = calloc(1, sizeof(LSSplits));
     if (!self) {
         return NULL;
@@ -73,7 +81,7 @@ LSComponent* ls_component_splits_new(json_t* config)
     /* Configuration option: `pin-final`
      * default: true
      * If true, the last split will always be visible. */
-    self->opt_pin_final = !json_is_false(json_object_get(config, "pin-final"));
+    opt.pin_final = !json_is_false(json_object_get(config, "pin-final"));
 
     /* --- End of configuration options --- */
 
@@ -96,13 +104,22 @@ LSComponent* ls_component_splits_new(json_t* config)
     self->icons_css_provider = NULL;
     self->scroll_changed_handler = 0;
 
-    self->split_last = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    add_class(self->split_last, "split-last");
-    gtk_widget_set_hexpand(self->split_last, TRUE);
-
     self->container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(self->container), self->split_scroller);
-    gtk_box_append(GTK_BOX(self->container), self->split_last);
+	gtk_box_append(GTK_BOX(self->container), self->split_scroller);
+
+	if (opt.pin_final) {
+		self->split_last = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		add_class(self->split_last, "split-last");
+		gtk_widget_set_hexpand(self->split_last, TRUE);
+
+		// add the pinned split widget above or below scrolling splits
+		if (self->opt_reverse_order) {
+			gtk_box_prepend(GTK_BOX(self->container), self->split_last);
+		} else {
+			gtk_box_append(GTK_BOX(self->container), self->split_last);
+		}
+	}
+
     return (LSComponent*)self;
 }
 
@@ -136,7 +153,21 @@ static GtkWidget* splits_widget(LSComponent* self)
     return ((LSSplits*)self)->container;
 }
 
-static void scroll_to_last(GtkAdjustment* adjustment, gpointer data)
+/**
+ * Note for myself: bit unsure of this function, but I think it exists for the
+ * case where the scrollable element is the non-pinned portion of the splits.
+ *
+ * Thus, when reaching the bottom via scroll, the pinned split is tacked onto
+ * the main splits, which grows the scroller section. This is probably means
+ * that one more scroll is needed to actually reach the bottom, so we call
+ * this instead (?)
+ *
+ * lower: start coordinate of splits
+ * upper: end coordinate of splits (content height)
+ * page_size: height of visible portion
+ *
+ * (so upper - page_size is negative if all splits are visible) */
+static void scroll_to_bottom(GtkAdjustment* adjustment, gpointer data)
 {
     LSSplits* self = data;
     double lower = gtk_adjustment_get_lower(adjustment);
@@ -145,6 +176,94 @@ static void scroll_to_last(GtkAdjustment* adjustment, gpointer data)
 
     g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
     gtk_adjustment_set_value(adjustment, MAX(lower, upper - page_size));
+}
+
+/* Near copy except this is for the top if reverse is set */
+static void scroll_to_top(GtkAdjustment* adjustment, gpointer data)
+{
+    LSSplits* self = data;
+    g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
+    gtk_adjustment_set_value(adjustment, 0.);
+}
+
+/**
+ * Scrolls to the current split if it's not visible.
+ *
+ * @param self_ The splits component itself.
+ * @param timer The timer instance.
+ */
+static void splits_scroll_to_split(LSComponent* self_, const ls_timer* timer)
+{
+    LSSplits* self = (LSSplits*)self_;
+    int split_h;
+    int scroller_h;
+    double curr_scroll;
+    double min_scroll, max_scroll;
+    const graphene_point_t origin = GRAPHENE_POINT_INIT(0, 0);
+    graphene_point_t split_position;
+
+    if (timer->game->split_count == 0)
+        return;
+
+    unsigned int prev = timer->curr_split ? timer->curr_split - 1 : 0;
+    unsigned int curr = timer->curr_split;
+    unsigned int next = timer->curr_split + 1;
+    if (curr >= self->split_count) {
+        curr = self->split_count - 1;
+    }
+    if (next >= self->split_count) {
+        next = self->split_count - 1;
+    }
+    curr_scroll = gtk_adjustment_get_value(self->split_adjust);
+	if (self->opt_reverse_order) {
+		if (!gtk_widget_compute_point(
+				self->split_rows[curr],
+				self->split_viewport,
+				&origin, &split_position)) {
+			return;
+		}
+	} else {
+		if (!gtk_widget_compute_point(
+				self->split_titles[prev],
+				self->split_viewport,
+				&origin, &split_position)) {
+			return;
+		}
+	}
+    scroller_h = gtk_widget_get_height(self->split_scroller);
+    split_h = gtk_widget_get_height(self->split_rows[curr]);
+    if (prev != next) {
+		// add room for previous split, if valid
+        int h = gtk_widget_get_height(self->split_rows[next]);
+        if (split_h + h < scroller_h) {
+            split_h += h;
+        }
+    }
+
+	min_scroll = split_position.y + curr_scroll - scroller_h + split_h;
+	max_scroll = split_position.y + curr_scroll;
+
+	// printf("scroll vals:\n rel pos %lld\n scroll pos %lld\n scroller height %d\n combi split height %d\n",
+		// (long long) split_position.y,
+		// (long long) curr_scroll,
+		// scroller_h,
+		// split_h);
+
+    if (curr_scroll > max_scroll) {
+		/* TODO: For some reason, on reverse scroll, if we're all the way at
+		 * the bottom, it takes this branch but it stays stuck at the bottom.
+		 * The values appear correct, too?
+		 * Other times, it jumps an extra split ahead. This may be related.
+		 * (Though, this happens on normal and reverse ordering.) */
+
+		/* largest scroll value (aka scrolled furthest down) in order for a
+		 * split to be fully visible on the top */
+        gtk_adjustment_set_value(self->split_adjust, max_scroll);
+    } else if (curr_scroll < min_scroll) {
+		/* smallest scroll value (aka scrolled closest to top) in order for a
+		 * split to be fully visible on the bottom */
+        gtk_adjustment_set_value(self->split_adjust, min_scroll);
+    }
 }
 
 static void splits_trailer(LSComponent* self_)
@@ -156,33 +275,47 @@ static void splits_trailer(LSComponent* self_)
     double upper = gtk_adjustment_get_upper(self->split_adjust);
     double page_size = gtk_adjustment_get_page_size(self->split_adjust);
     double scroll_end = MAX(lower, upper - page_size);
+
+	bool last_split_in_view;
+	if (self->opt_reverse_order) {
+		last_split_in_view = (curr_scroll <= SCROLL_TOLERANCE);
+	} else {
+		last_split_in_view = (scroll_end - curr_scroll <= SCROLL_TOLERANCE);
+	}
+
     g_object_ref(self->split_rows[last]);
-    if (gtk_widget_get_parent(self->split_rows[last]) == self->splits) {
-        if (curr_scroll < scroll_end - SCROLL_TOLERANCE) {
-            // move last split to split_last
-            gtk_box_remove(GTK_BOX(self->splits),
-                self->split_rows[last]);
-            gtk_box_append(GTK_BOX(self->split_last),
-                self->split_rows[last]);
-            gtk_widget_set_visible(self->split_last, TRUE);
-        }
-    } else {
-        if (curr_scroll >= scroll_end - SCROLL_TOLERANCE) {
-            // move last split to split box
-            g_clear_signal_handler(&self->scroll_changed_handler,
-                self->split_adjust);
-            self->scroll_changed_handler = g_signal_connect(
-                self->split_adjust,
-                "changed",
-                G_CALLBACK(scroll_to_last),
-                self);
-            gtk_box_remove(GTK_BOX(self->split_last),
-                self->split_rows[last]);
-            gtk_box_append(GTK_BOX(self->splits),
-                self->split_rows[last]);
-            gtk_widget_set_visible(self->split_last, FALSE);
-        }
-    }
+
+	if (gtk_widget_get_parent(self->split_rows[last]) == self->splits) {
+		if (!last_split_in_view) {
+			// move last split to split_last
+			gtk_box_remove(GTK_BOX(self->splits), self->split_rows[last]);
+			gtk_box_append(GTK_BOX(self->split_last), self->split_rows[last]);
+			gtk_widget_set_visible(self->split_last, TRUE);
+		}
+	} else {
+		if (last_split_in_view) {
+			// move last split to split box
+			g_clear_signal_handler(&self->scroll_changed_handler, self->split_adjust);
+			gtk_box_remove(GTK_BOX(self->split_last), self->split_rows[last]);
+			if (self->opt_reverse_order) {
+				self->scroll_changed_handler = g_signal_connect(
+					self->split_adjust,
+					"changed",
+					G_CALLBACK(scroll_to_top),
+					self);
+				gtk_box_prepend(GTK_BOX(self->splits), self->split_rows[last]);
+			} else {
+				self->scroll_changed_handler = g_signal_connect(
+					self->split_adjust,
+					"changed",
+					G_CALLBACK(scroll_to_bottom),
+					self);
+				gtk_box_append(GTK_BOX(self->splits), self->split_rows[last]);
+			}
+			gtk_widget_set_visible(self->split_last, FALSE);
+		}
+	}
+
     g_object_unref(self->split_rows[last]);
 }
 
@@ -199,6 +332,11 @@ static void splits_show_game(LSComponent* self_, const ls_game* game,
     LSSplits* self = (LSSplits*)self_;
     char str[256];
     self->split_count = game->split_count;
+
+	if (self->split_count < 1) {
+		LOG_WARN("Could not render splits; split count is 0");
+		return;
+	}
 
     self->split_rows = calloc(self->split_count, sizeof(GtkWidget*));
     if (!self->split_rows) {
@@ -239,12 +377,11 @@ static void splits_show_game(LSComponent* self_, const ls_game* game,
         add_class(self->split_rows[i], "split");
         gtk_widget_set_hexpand(self->split_rows[i], TRUE);
 
-        if (self->opt_reverse_order) {
-            gtk_box_append(GTK_BOX(self->splits), self->split_rows[i]);
-        } else {
-            printf("prepending %d\n", i);
-            gtk_box_prepend(GTK_BOX(self->splits), self->split_rows[i]);
-        }
+		if (self->opt_reverse_order) {
+			gtk_box_prepend(GTK_BOX(self->splits), self->split_rows[i]);
+		} else {
+			gtk_box_append(GTK_BOX(self->splits), self->split_rows[i]);
+		}
 
         self->split_titles[i] = gtk_label_new(game->split_titles[i]);
         add_class(self->split_titles[i], "split-title");
@@ -325,8 +462,6 @@ static void splits_show_game(LSComponent* self_, const ls_game* game,
     }
 
     gtk_widget_set_visible(self->splits, TRUE);
-    if (self->split_count)
-        splits_trailer(self_);
 }
 
 /**
@@ -458,66 +593,10 @@ static void splits_draw(LSComponent* self_, const ls_game* game, const ls_timer*
         }
     }
 
-    if (self->split_count)
+    splits_scroll_to_split(self_, timer);
+
+    if (self->split_last && self->split_count)
         splits_trailer(self_);
-}
-
-/**
- * Scrolls to the current split if it's not visible.
- *
- * @param self_ The splits component itself.
- * @param timer The timer instance.
- */
-static void splits_scroll_to_split(LSComponent* self_, const ls_timer* timer)
-{
-    LSSplits* self = (LSSplits*)self_;
-    int split_h;
-    int scroller_h;
-    double curr_scroll;
-    double min_scroll, max_scroll;
-    const graphene_point_t origin = GRAPHENE_POINT_INIT(0, 0);
-    graphene_point_t split_position;
-
-    if (timer->game->split_count == 0)
-        return;
-
-    unsigned int prev = timer->curr_split ? timer->curr_split - 1 : 0;
-    unsigned int curr = timer->curr_split;
-    unsigned int next = timer->curr_split + 1;
-    if (prev < 0) {
-        prev = 0;
-    }
-    if (curr >= self->split_count) {
-        curr = self->split_count - 1;
-    }
-    if (next >= self->split_count) {
-        next = self->split_count - 1;
-    }
-    curr_scroll = gtk_adjustment_get_value(self->split_adjust);
-    if (!gtk_widget_compute_point(
-            self->split_titles[prev],
-            self->split_viewport,
-            &origin, &split_position)) {
-        return;
-    }
-    scroller_h = gtk_widget_get_height(self->split_scroller);
-    split_h = gtk_widget_get_height(self->split_titles[prev]);
-    if (curr != next && curr != prev) {
-        split_h += gtk_widget_get_height(self->split_titles[curr]);
-    }
-    if (next != prev) {
-        int h = gtk_widget_get_height(self->split_titles[next]);
-        if (split_h + h < scroller_h) {
-            split_h += h;
-        }
-    }
-    min_scroll = split_position.y + curr_scroll - scroller_h + split_h;
-    max_scroll = split_position.y + curr_scroll;
-    if (curr_scroll > max_scroll) {
-        gtk_adjustment_set_value(self->split_adjust, max_scroll);
-    } else if (curr_scroll < min_scroll) {
-        gtk_adjustment_set_value(self->split_adjust, min_scroll);
-    }
 }
 
 void splits_start_split(LSComponent* self, const ls_timer* timer)

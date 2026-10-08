@@ -150,13 +150,13 @@ void display_confirm_reset_dialog(LSDialogCallback perform_reset, LSAppWindow* w
 
     const LSDialogOption options[] = {
         {
-            .label = "_Yes",
+            .label = "_Quit",
             .callback = perform_reset,
             .is_cancel = FALSE,
             .is_default = FALSE,
         },
         {
-            .label = "_No",
+            .label = "_Cancel",
             .callback = NULL,
             .is_cancel = TRUE,
             .is_default = TRUE,

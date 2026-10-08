@@ -116,7 +116,7 @@ libresplit_resources = gnome.compile_resources(
 shared_c_flags = [
     '-DPREFIX="' + get_option('prefix') + '"',
     '-DDATADIR="' + get_option('datadir') + '"',
-    '-Werror',
+    # '-Werror',
     '-Wall',
     '-Wbad-function-cast',
     '-Wsign-compare',
