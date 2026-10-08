@@ -245,7 +245,7 @@ static void detailed_timer_clear_game(LSComponent* self_)
 static void detailed_timer_draw(LSComponent* self_, const ls_game* game, const ls_timer* timer)
 {
     LSDetailedTimer* self = (LSDetailedTimer*)self_;
-    // char str[256], millis[10] = { 0 }, seg[256], seg_millis[10] = { 0 };
+	long long time_val;
     char time_str[18];
     char ms_str[MAX_PRECISION + 2]; // [0] = '.' ; [8] = '\0'
     char pb[256] = "PB:    ";
@@ -261,10 +261,21 @@ static void detailed_timer_draw(LSComponent* self_, const ls_game* game, const l
     remove_class(self->time, "losing");
     remove_class(self->time, "best-split");
 
+	time_val = ls_time_get_by_method(ls_timer_get_time(timer, true), self->comparison_method);
+    ls_time_millis_string(time_str, &ms_str[1], time_val);
+	if (self->precision == 0) {
+		ms_str[0] = '\0';
+	} else {
+		ms_str[0] = '.';
+		ms_str[self->precision + 1] = '\0';
+	}
+    gtk_label_set_text(GTK_LABEL(self->time_seconds), time_str);
+    gtk_label_set_text(GTK_LABEL(self->time_millis), ms_str);
+
     if (curr == game->split_count) {
         curr = game->split_count - 1;
     }
-    if (ls_time_get_by_method(ls_timer_get_time(timer, true), self->comparison_method) <= 0) {
+    if (time_val <= 0) {
         add_class(self->time, "delay");
     } else {
         if (timer->curr_split == game->split_count
@@ -283,22 +294,9 @@ static void detailed_timer_draw(LSComponent* self_, const ls_game* game, const l
         }
     }
 
-    ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(
-			ls_timer_get_time(timer, true),
-			self->comparison_method));
-	if (self->precision == 0) {
-		ms_str[0] = '\0';
-	} else {
-		ms_str[0] = '.';
-		ms_str[self->precision + 1] = '\0';
-	}
-    gtk_label_set_text(GTK_LABEL(self->time_seconds), time_str);
-    gtk_label_set_text(GTK_LABEL(self->time_millis), ms_str);
-
-	if (self->segment) {
-		ls_time_millis_string(time_str, &ms_str[1], ls_time_get_by_method(
-				timer->segment_times[timer->curr_split],
-				self->comparison_method));
+	if (self->segment && timer->started) {
+		time_val = ls_time_get_by_method(timer->segment_times[timer->curr_split], self->comparison_method);
+		ls_time_millis_string(time_str, &ms_str[1], time_val);
 		if (self->segment_precision == 0) {
 			ms_str[0] = '\0';
 		} else {

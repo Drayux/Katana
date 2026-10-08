@@ -87,7 +87,7 @@ typedef struct ls_timer {
     long long realTime; /*!< Real time. Starts when run start and pauses while loading. Only to be used internally */
     int loading; /*!< Currently loading? used for knowing if loadingTime should tick or not. Only to be used internally */
     long long loadingTime; /*!< Time spent loading, used to subtract from real time when trying to get Load-Removed Time. Only to be used internally */
-    int started; /*!< Wether the run has started, either by LASR or manually, keeps being set to true after run finished */
+    int started; /*!< Whether the run has started, either by LASR or manually, keeps being set to true after run finished */
     bool running; /*!< Whether the runner is currently running. If this is false and started is true then the run finished. Mainly used to check if some actions are valid to perform (splits, pause, etc) */
     unsigned int curr_split; /*!< Index of the current split, 0 for first split */
     ls_time sum_of_bests; /*!< Sum of best segments */

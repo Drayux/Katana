@@ -154,39 +154,6 @@ static GtkWidget* splits_widget(LSComponent* self)
 }
 
 /**
- * Note for myself: bit unsure of this function, but I think it exists for the
- * case where the scrollable element is the non-pinned portion of the splits.
- *
- * Thus, when reaching the bottom via scroll, the pinned split is tacked onto
- * the main splits, which grows the scroller section. This is probably means
- * that one more scroll is needed to actually reach the bottom, so we call
- * this instead (?)
- *
- * lower: start coordinate of splits
- * upper: end coordinate of splits (content height)
- * page_size: height of visible portion
- *
- * (so upper - page_size is negative if all splits are visible) */
-static void scroll_to_bottom(GtkAdjustment* adjustment, gpointer data)
-{
-    LSSplits* self = data;
-    double lower = gtk_adjustment_get_lower(adjustment);
-    double upper = gtk_adjustment_get_upper(adjustment);
-    double page_size = gtk_adjustment_get_page_size(adjustment);
-
-    g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
-    gtk_adjustment_set_value(adjustment, MAX(lower, upper - page_size));
-}
-
-/* Near copy except this is for the top if reverse is set */
-static void scroll_to_top(GtkAdjustment* adjustment, gpointer data)
-{
-    LSSplits* self = data;
-    g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
-    gtk_adjustment_set_value(adjustment, 0.);
-}
-
-/**
  * Scrolls to the current split if it's not visible.
  *
  * @param self_ The splits component itself.
@@ -243,11 +210,15 @@ static void splits_scroll_to_split(LSComponent* self_, const ls_timer* timer)
 	min_scroll = split_position.y + curr_scroll - scroller_h + split_h;
 	max_scroll = split_position.y + curr_scroll;
 
-	// printf("scroll vals:\n rel pos %lld\n scroll pos %lld\n scroller height %d\n combi split height %d\n",
-		// (long long) split_position.y,
-		// (long long) curr_scroll,
-		// scroller_h,
-		// split_h);
+	printf("scroll vals:\n" \
+			" rel pos %f\n scroll pos %f\n scroller height %d\n combi split height %d\n" \
+			" min_scroll %f\n max_scroll %f\n",
+		split_position.y,
+		curr_scroll,
+		scroller_h,
+		split_h,
+		min_scroll,
+		max_scroll);
 
     if (curr_scroll > max_scroll) {
 		/* TODO: For some reason, on reverse scroll, if we're all the way at
@@ -264,6 +235,39 @@ static void splits_scroll_to_split(LSComponent* self_, const ls_timer* timer)
 		 * split to be fully visible on the bottom */
         gtk_adjustment_set_value(self->split_adjust, min_scroll);
     }
+}
+
+/**
+ * Note for myself: bit unsure of this function, but I think it exists for the
+ * case where the scrollable element is the non-pinned portion of the splits.
+ *
+ * Thus, when reaching the bottom via scroll, the pinned split is tacked onto
+ * the main splits, which grows the scroller section. This is probably means
+ * that one more scroll is needed to actually reach the bottom, so we call
+ * this instead (?)
+ *
+ * lower: start coordinate of splits
+ * upper: end coordinate of splits (content height)
+ * page_size: height of visible portion
+ *
+ * (so upper - page_size is negative if all splits are visible) */
+static void scroll_to_bottom(GtkAdjustment* adjustment, gpointer data)
+{
+    LSSplits* self = data;
+    double lower = gtk_adjustment_get_lower(adjustment);
+    double upper = gtk_adjustment_get_upper(adjustment);
+    double page_size = gtk_adjustment_get_page_size(adjustment);
+
+    g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
+    gtk_adjustment_set_value(adjustment, MAX(lower, upper - page_size));
+}
+
+/* Near copy except this is for the top if reverse is set */
+static void scroll_to_top(GtkAdjustment* adjustment, gpointer data)
+{
+    LSSplits* self = data;
+    g_clear_signal_handler(&self->scroll_changed_handler, adjustment);
+    gtk_adjustment_set_value(adjustment, 0.);
 }
 
 static void splits_trailer(LSComponent* self_)
@@ -461,6 +465,15 @@ static void splits_show_game(LSComponent* self_, const ls_game* game,
         g_string_free(icons_css_src, TRUE);
     }
 
+	/* Scroll to the top or bottom of the splits (notably, bottom on reverse
+	 * order) as soon as their dimensions become available. The height is only
+	 * known *after* they are rendered, so a callback is necessary to know when
+	 * that happens. */
+	self->scroll_changed_handler = g_signal_connect(
+			self->split_adjust,
+			"changed",
+			G_CALLBACK((self->opt_reverse_order ? scroll_to_bottom : scroll_to_top)),
+			self);
     gtk_widget_set_visible(self->splits, TRUE);
 }
 
@@ -592,8 +605,6 @@ static void splits_draw(LSComponent* self_, const ls_game* game, const ls_timer*
             }
         }
     }
-
-    splits_scroll_to_split(self_, timer);
 
     if (self->split_last && self->split_count)
         splits_trailer(self_);
