@@ -14,19 +14,21 @@ extern atomic_bool exit_requested;
  * logging thread to consume
  */
 typedef struct LogQueue {
-    char message_queue[LOG_QUEUE_SIZE][LOG_STR_LEN]; /*!< The read circular queue */
-    int head; /*!< Index of the head of the queue */
-    int tail; /*!< Index of the tail of the queue */
-    pthread_mutex_t lock; /*!< Lock to avoid race conditions */
-    pthread_cond_t cond; /*!< Condition to signal between the logMessage function and the logging thread */
+	char message_queue[LOG_QUEUE_SIZE]
+					  [LOG_STR_LEN]; /*!< The read circular queue */
+	int head;						 /*!< Index of the head of the queue */
+	int tail;						 /*!< Index of the tail of the queue */
+	pthread_mutex_t lock;			 /*!< Lock to avoid race conditions */
+	pthread_cond_t cond; /*!< Condition to signal between the logMessage
+							function and the logging thread */
 } LogQueue;
 
 void initLogQueue(void);
 
-void logMessage(const char* fmt, ...);
+void logMessage(char const * fmt, ...);
 void close_logger();
 
-void* loggingThread(void* arg);
+void * loggingThread(void * arg);
 
 #define LOG_LEVEL_DEBUG 0
 #define LOG_LEVEL_INFO 1
@@ -40,18 +42,19 @@ void* loggingThread(void* arg);
 #define LOG__XSTR(x) #x
 #define LOG__STR(x) LOG__XSTR(x)
 
-#define LOG_STRING(file, line, level, message) \
-    file ": " line " | " level " - " message "\n"
+#define LOG_STRING(file, line, level, message)                                 \
+	file ": " line " | " level " - " message "\n"
 
-#define LOG(T, message)                                                    \
-    {                                                                      \
-        logMessage(LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, message)); \
-    }
+#define LOG(T, message)                                                        \
+	{                                                                          \
+		logMessage(LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, message));     \
+	}
 
-#define LOGF(T, fmt, ...)                                                           \
-    {                                                                               \
-        logMessage(LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, fmt), __VA_ARGS__); \
-    }
+#define LOGF(T, fmt, ...)                                                      \
+	{                                                                          \
+		logMessage(                                                            \
+			LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, fmt), __VA_ARGS__);   \
+	}
 
 #if LOG_LEVEL == LOG_LEVEL_DEBUG
 #define LOG_DEBUG(message) LOG([Debug], message);

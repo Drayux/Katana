@@ -7,123 +7,129 @@
 #include "timer.h"
 
 /**
- * Stops the timer if it's running, otherwise resets it. If the timer is reset, the current run will be saved to history if enabled.
+ * Stops the timer if it's running, otherwise resets it. If the timer is reset,
+ * the current run will be saved to history if enabled.
  *
  * @param win The LibreSplit window
  */
-void timer_stop_and_reset(LSAppWindow* win)
+void timer_stop_and_reset(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running) {
-        ls_timer_stop(win->timer);
-    }
+	if (win->timer->running) {
+		ls_timer_stop(win->timer);
+	}
 
-    if (ls_timer_reset(win->timer, win->game)) {
-        ls_app_window_clear_game(win);
-        ls_app_window_show_game(win);
-        if (cfg.libresplit.auto_save.value.b) {
-            save_game(win->game);
-        }
-    }
+	if (ls_timer_reset(win->timer, win->game)) {
+		ls_app_window_clear_game(win);
+		ls_app_window_show_game(win);
+		if (cfg.libresplit.auto_save.value.b) {
+			save_game(win->game);
+		}
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->stop_reset) {
-            component->ops->stop_reset(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->stop_reset) {
+			component->ops->stop_reset(component, win->timer);
+		}
+	}
 }
 
 /**
- * Starts the timer, if it's not already running. If the timer is already running, it does a split.
+ * Starts the timer, if it's not already running. If the timer is already
+ * running, it does a split.
  *
  * @param win The LibreSplit window
  */
-void timer_start_split(LSAppWindow* win)
+void timer_start_split(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (!win->timer->started) { // To start again a reset needs to happen
-        if (!ls_timer_start(win->timer)) {
-            return;
-        }
-    } else {
-        ls_timer_split(win->timer);
-    }
+	if (!win->timer->started) { // To start again a reset needs to happen
+		if (!ls_timer_start(win->timer)) {
+			return;
+		}
+	}
+	else {
+		ls_timer_split(win->timer);
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->start_split) {
-            component->ops->start_split(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->start_split) {
+			component->ops->start_split(component, win->timer);
+		}
+	}
 }
 
 /**
- * Starts the timer, if it's not already running. If the timer is already running, it does nothing.
+ * Starts the timer, if it's not already running. If the timer is already
+ * running, it does nothing.
  *
  * @param win The LibreSplit window
  */
-void timer_start(LSAppWindow* win)
+void timer_start(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running)
-        return; // Timer is already running, do nothing
+	if (win->timer->running)
+		return; // Timer is already running, do nothing
 
-    if (!ls_timer_start(win->timer)) {
-        return;
-    }
+	if (!ls_timer_start(win->timer)) {
+		return;
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->start_split) {
-            component->ops->start_split(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->start_split) {
+			component->ops->start_split(component, win->timer);
+		}
+	}
 }
 
 /**
- * Stops the timer if it's running, otherwise resets it. If the timer is reset, the current run will be saved to history if enabled.
+ * Stops the timer if it's running, otherwise resets it. If the timer is reset,
+ * the current run will be saved to history if enabled.
  *
  * @param win The LibreSplit window
  */
-void timer_stop_or_reset(LSAppWindow* win)
+void timer_stop_or_reset(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running) {
-        ls_timer_stop(win->timer);
-    } else {
-        // Restart LASR on reset
-        restart_auto_splitter();
+	if (win->timer->running) {
+		ls_timer_stop(win->timer);
+	}
+	else {
+		// Restart LASR on reset
+		restart_auto_splitter();
 
-        if (ls_timer_reset(win->timer, win->game)) {
-            ls_app_window_clear_game(win);
-            ls_app_window_show_game(win);
-            if (cfg.libresplit.auto_save.value.b) {
-                save_game(win->game);
-            }
-        }
-    }
+		if (ls_timer_reset(win->timer, win->game)) {
+			ls_app_window_clear_game(win);
+			ls_app_window_show_game(win);
+			if (cfg.libresplit.auto_save.value.b) {
+				save_game(win->game);
+			}
+		}
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->stop_reset) {
-            component->ops->stop_reset(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->stop_reset) {
+			component->ops->stop_reset(component, win->timer);
+		}
+	}
 }
 
 /**
  * @brief Performs the actual cancellation of a run when it should be cancelled.
- * This maybe be called from the affirmitive action of a run reset warning dialog.
- * This function returns gboolean for LSDialogCallback and GSourceFunc
+ * This maybe be called from the affirmitive action of a run reset warning
+ * dialog. This function returns gboolean for LSDialogCallback and GSourceFunc
  * compatibility, but is effectively a void function in practice.
  *
  * @param window A pointer to the main LSAppWindow of the app.
@@ -131,61 +137,64 @@ void timer_stop_or_reset(LSAppWindow* win)
  */
 static gboolean perform_cancel_run(gpointer window)
 {
-    LSAppWindow* win = window;
+	LSAppWindow * win = window;
 
-    // autosplitter/global hotkey start sanity checks
-    if (!win->timer) {
-        LOG_WARN("Timer became null after confirm, cannot cancel run.");
-        return G_SOURCE_REMOVE;
-    }
+	// autosplitter/global hotkey start sanity checks
+	if (!win->timer) {
+		LOG_WARN("Timer became null after confirm, cannot cancel run.");
+		return G_SOURCE_REMOVE;
+	}
 
-    if (win->timer->running) {
-        LOG_WARN("Timer started running after confirm, cannot cancel run.");
-        return G_SOURCE_REMOVE;
-    }
+	if (win->timer->running) {
+		LOG_WARN("Timer started running after confirm, cannot cancel run.");
+		return G_SOURCE_REMOVE;
+	}
 
-    ls_timer_cancel(win->timer);
-    ls_app_window_clear_game(win);
-    ls_app_window_show_game(win);
-    if (cfg.libresplit.auto_save.value.b) {
-        save_game(win->game);
-    }
+	ls_timer_cancel(win->timer);
+	ls_app_window_clear_game(win);
+	ls_app_window_show_game(win);
+	if (cfg.libresplit.auto_save.value.b) {
+		save_game(win->game);
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->cancel_run) {
-            component->ops->cancel_run(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->cancel_run) {
+			component->ops->cancel_run(component, win->timer);
+		}
+	}
 
-    return G_SOURCE_REMOVE;
+	return G_SOURCE_REMOVE;
 }
 
 /**
- * @brief Cancels the current run, resetting the timer and game state and saving the cancelled run to history if enabled.
+ * @brief Cancels the current run, resetting the timer and game state and saving
+ * the cancelled run to history if enabled.
  *
  * @param win The LibreSplit window
  */
-void timer_cancel_run(LSAppWindow* win)
+void timer_cancel_run(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    // Disallow resets while running
-    if (win->timer->running) {
-        LOG_DEBUG("Timer is running, cannot cancel run.");
-        return;
-    }
+	// Disallow resets while running
+	if (win->timer->running) {
+		LOG_DEBUG("Timer is running, cannot cancel run.");
+		return;
+	}
 
-    // Warn if the cancel will lose a gold/rainbow split, and allow the user to abort the cancel if they want to keep it
-    if (ls_timer_has_gold_split(win->timer) || ls_timer_has_rainbow_split(win->timer)) {
-        if (cfg.libresplit.ask_on_achievement.value.b) {
-            display_confirm_reset_dialog(perform_cancel_run, win);
-            return;
-        }
-    }
+	// Warn if the cancel will lose a gold/rainbow split, and allow the user to
+	// abort the cancel if they want to keep it
+	if (ls_timer_has_gold_split(win->timer)
+		|| ls_timer_has_rainbow_split(win->timer)) {
+		if (cfg.libresplit.ask_on_achievement.value.b) {
+			display_confirm_reset_dialog(perform_cancel_run, win);
+			return;
+		}
+	}
 
-    perform_cancel_run(win);
+	perform_cancel_run(win);
 }
 
 /**
@@ -193,38 +202,39 @@ void timer_cancel_run(LSAppWindow* win)
  *
  * @param win The LibreSplit window
  */
-void timer_skip(LSAppWindow* win)
+void timer_skip(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    ls_timer_skip(win->timer);
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->skip) {
-            component->ops->skip(component, win->timer);
-        }
-    }
+	ls_timer_skip(win->timer);
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->skip) {
+			component->ops->skip(component, win->timer);
+		}
+	}
 }
 
 /**
- * Unsplits the last made split. If the timer is not running or if there are no splits to unsplit, it does nothing.
+ * Unsplits the last made split. If the timer is not running or if there are no
+ * splits to unsplit, it does nothing.
  *
  * @param win The LibreSplit window
  */
-void timer_unsplit(LSAppWindow* win)
+void timer_unsplit(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    ls_timer_unsplit(win->timer);
+	ls_timer_unsplit(win->timer);
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->unsplit) {
-            component->ops->unsplit(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->unsplit) {
+			component->ops->unsplit(component, win->timer);
+		}
+	}
 }
 
 /**
@@ -232,19 +242,19 @@ void timer_unsplit(LSAppWindow* win)
  *
  * @param win The LibreSplit window
  */
-void timer_split(LSAppWindow* win)
+void timer_split(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    ls_timer_split(win->timer);
+	ls_timer_split(win->timer);
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->start_split) {
-            component->ops->start_split(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->start_split) {
+			component->ops->start_split(component, win->timer);
+		}
+	}
 }
 
 /**
@@ -252,21 +262,21 @@ void timer_split(LSAppWindow* win)
  *
  * @param win The LibreSplit window
  */
-void timer_pause(LSAppWindow* win)
+void timer_pause(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running) {
-        ls_timer_pause(win->timer);
-    }
+	if (win->timer->running) {
+		ls_timer_pause(win->timer);
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->pause) {
-            component->ops->pause(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->pause) {
+			component->ops->pause(component, win->timer);
+		}
+	}
 }
 
 /**
@@ -274,21 +284,21 @@ void timer_pause(LSAppWindow* win)
  *
  * @param win The LibreSplit window
  */
-void timer_unpause(LSAppWindow* win)
+void timer_unpause(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running) {
-        ls_timer_unpause(win->timer);
-    }
+	if (win->timer->running) {
+		ls_timer_unpause(win->timer);
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->unpause) {
-            component->ops->unpause(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->unpause) {
+			component->ops->unpause(component, win->timer);
+		}
+	}
 }
 
 /**
@@ -296,19 +306,19 @@ void timer_unpause(LSAppWindow* win)
  *
  * @param win TheLibreSplit window
  */
-void timer_stop(LSAppWindow* win)
+void timer_stop(LSAppWindow * win)
 {
-    if (!win->timer)
-        return;
+	if (!win->timer)
+		return;
 
-    if (win->timer->running) {
-        ls_timer_stop(win->timer);
-    }
+	if (win->timer->running) {
+		ls_timer_stop(win->timer);
+	}
 
-    for (GList* l = win->components; l != NULL; l = l->next) {
-        LSComponent* component = l->data;
-        if (component->ops->stop_reset) {
-            component->ops->stop_reset(component, win->timer);
-        }
-    }
+	for (GList * l = win->components; l != NULL; l = l->next) {
+		LSComponent * component = l->data;
+		if (component->ops->stop_reset) {
+			component->ops->stop_reset(component, win->timer);
+		}
+	}
 }

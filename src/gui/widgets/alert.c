@@ -8,14 +8,15 @@
  * @param message The message header
  * @param detail Optional message details
  */
-void ls_alert_error(GtkWindow* parent, const char* title, const char* message, const char* detail)
+void ls_alert_error(GtkWindow * parent, char const * title,
+	char const * message, char const * detail)
 {
-    const LSDialogIcon icon = {
-        .source = "dialog-error",
-        .type = LS_DIALOG_ICON_NAME,
-    };
+	LSDialogIcon const icon = {
+		.source = "dialog-error",
+		.type = LS_DIALOG_ICON_NAME,
+	};
 
-    ls_alert(parent, title, message, detail, &icon);
+	ls_alert(parent, title, message, detail, &icon);
 }
 
 /**
@@ -26,14 +27,15 @@ void ls_alert_error(GtkWindow* parent, const char* title, const char* message, c
  * @param message The message header
  * @param detail Optional message details
  */
-void ls_alert_warning(GtkWindow* parent, const char* title, const char* message, const char* detail)
+void ls_alert_warning(GtkWindow * parent, char const * title,
+	char const * message, char const * detail)
 {
-    const LSDialogIcon icon = {
-        .source = "dialog-warning",
-        .type = LS_DIALOG_ICON_NAME,
-    };
+	LSDialogIcon const icon = {
+		.source = "dialog-warning",
+		.type = LS_DIALOG_ICON_NAME,
+	};
 
-    ls_alert(parent, title, message, detail, &icon);
+	ls_alert(parent, title, message, detail, &icon);
 }
 
 /**
@@ -44,14 +46,15 @@ void ls_alert_warning(GtkWindow* parent, const char* title, const char* message,
  * @param message The message header
  * @param detail Optional message details
  */
-void ls_alert_info(GtkWindow* parent, const char* title, const char* message, const char* detail)
+void ls_alert_info(GtkWindow * parent, char const * title, char const * message,
+	char const * detail)
 {
-    const LSDialogIcon icon = {
-        .source = "dialog-information",
-        .type = LS_DIALOG_ICON_NAME,
-    };
+	LSDialogIcon const icon = {
+		.source = "dialog-information",
+		.type = LS_DIALOG_ICON_NAME,
+	};
 
-    ls_alert(parent, title, message, detail, &icon);
+	ls_alert(parent, title, message, detail, &icon);
 }
 
 /**
@@ -63,16 +66,16 @@ void ls_alert_info(GtkWindow* parent, const char* title, const char* message, co
  * @param detail Optional message details
  * @param icon Optional icon to display on the alert
  */
-void ls_alert(GtkWindow* parent, const char* title, const char* message, const char* detail, const LSDialogIcon* icon)
+void ls_alert(GtkWindow * parent, char const * title, char const * message,
+	char const * detail, LSDialogIcon const * icon)
 {
-    const LSDialogOption options[] = {
-        {
-            .label = "_OK",
-            .callback = NULL,
-            .is_cancel = FALSE,
-            .is_default = TRUE,
-        }
-    };
+	LSDialogOption const options[] = {{
+		.label = "_OK",
+		.callback = NULL,
+		.is_cancel = FALSE,
+		.is_default = TRUE,
+	}};
 
-    ls_dialog_open(parent, title, message, detail, icon, options, G_N_ELEMENTS(options), NULL, NULL);
+	ls_dialog_open(parent, title, message, detail, icon, options,
+		G_N_ELEMENTS(options), NULL, NULL);
 }

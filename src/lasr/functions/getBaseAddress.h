@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int getBaseAddress(lua_State* L);
+int getBaseAddress(lua_State * L);

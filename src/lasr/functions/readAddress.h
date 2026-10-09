@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int readAddress(lua_State* L);
+int readAddress(lua_State * L);

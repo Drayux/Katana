@@ -1,5 +1,22 @@
----
-BasedOnStyle: WebKit
+BasedOnStyle: LLVM
+Language: Cpp
+
 IndentCaseBlocks: true
 IndentCaseLabels: true
-QualifierAlignment: Left
+
+UseTab: Always
+TabWidth: 4
+IndentWidth: 4
+ContinuationIndentWidth: 4
+
+# ColumnLimit: 80
+# ReflowComments: true # Always
+
+BreakBeforeBraces: Stroustrup
+SpaceAfterCStyleCast: true
+PointerAlignment: Middle
+QualifierAlignment: Right
+
+BreakBeforeBinaryOperators: NonAssignment
+AlignOperands: DontAlign
+AlignAfterOpenBracket: DontAlign

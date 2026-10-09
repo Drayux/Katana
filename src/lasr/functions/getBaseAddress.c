@@ -13,28 +13,32 @@
  *
  * @param L The Lua State
  */
-int getBaseAddress(lua_State* L)
+int getBaseAddress(lua_State * L)
 {
-    char module_name[PATH_MAX];
+	char module_name[PATH_MAX];
 
-    if (lua_gettop(L) == 0 || lua_isnil(L, 1)) {
-        strncpy(module_name, process.name, sizeof(module_name) - 1);
-    } else if (lua_isstring(L, 1)) {
-        const char* str = lua_tostring(L, 1);
-        strncpy(module_name, str, sizeof(module_name) - 1);
-    } else {
-        // Called with invalid non-string parameter
-        printf("[getBaseAddress] Module name must be a string or nil (for the main module)");
-        lua_pushnil(L);
-        return 1;
-    }
+	if (lua_gettop(L) == 0 || lua_isnil(L, 1)) {
+		strncpy(module_name, process.name, sizeof(module_name) - 1);
+	}
+	else if (lua_isstring(L, 1)) {
+		char const * str = lua_tostring(L, 1);
+		strncpy(module_name, str, sizeof(module_name) - 1);
+	}
+	else {
+		// Called with invalid non-string parameter
+		printf("[getBaseAddress] Module name must be a string or nil (for the "
+			   "main module)");
+		lua_pushnil(L);
+		return 1;
+	}
 
-    ProcessMap map;
-    if (maps_findMapByName(module_name, &map)) {
-        lua_pushinteger(L, (lua_Integer)map.start);
-        return 1;
-    }
-    lua_pushnil(L);
-    printf("[getBaseAddress] Cannot find module with name \"%s\"\n", module_name);
-    return 1;
+	ProcessMap map;
+	if (maps_findMapByName(module_name, &map)) {
+		lua_pushinteger(L, (lua_Integer) map.start);
+		return 1;
+	}
+	lua_pushnil(L);
+	printf(
+		"[getBaseAddress] Cannot find module with name \"%s\"\n", module_name);
+	return 1;
 }

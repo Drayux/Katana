@@ -8,4 +8,4 @@
 // TODO: Define a logs directory when it moves out of the root data path
 #define FOLDERS_LOGS_DIR ""
 
-void launch_fm_dir(GSimpleAction* action, GVariant* parameter, gpointer app);
+void launch_fm_dir(GSimpleAction * action, GVariant * parameter, gpointer app);

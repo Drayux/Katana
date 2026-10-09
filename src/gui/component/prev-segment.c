@@ -8,10 +8,12 @@
  * @brief The component representing the "Previous segment" part of LibreSplit
  */
 typedef struct LSPrevSegment {
-    LSComponent base; /*!< The base struct that is extended */
-    GtkWidget* container; /*!< The container for the previous segment */
-    GtkWidget* previous_segment_label; /*!< Label containing the previous segment text (or live segment in some cases) */
-    GtkWidget* previous_segment; /*!< Label containing the time */
+	LSComponent base;	   /*!< The base struct that is extended */
+	GtkWidget * container; /*!< The container for the previous segment */
+	GtkWidget *
+		previous_segment_label; /*!< Label containing the previous segment text
+								   (or live segment in some cases) */
+	GtkWidget * previous_segment; /*!< Label containing the time */
 } LSPrevSegment;
 extern LSComponentOps ls_prev_segment_operations;
 
@@ -21,34 +23,32 @@ extern LSComponentOps ls_prev_segment_operations;
 /**
  * Constructor
  */
-LSComponent* ls_component_prev_segment_new(json_t* config)
+LSComponent * ls_component_prev_segment_new(json_t * config)
 {
-    LSPrevSegment* self;
+	LSPrevSegment * self;
 
-    self = malloc(sizeof(LSPrevSegment));
-    if (!self) {
-        return NULL;
-    }
-    self->base.ops = &ls_prev_segment_operations;
+	self = malloc(sizeof(LSPrevSegment));
+	if (!self) {
+		return NULL;
+	}
+	self->base.ops = &ls_prev_segment_operations;
 
-    self->container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    add_class(self->container, "footer");
-    add_class(self->container, "prev-segment-container");
+	self->container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	add_class(self->container, "footer");
+	add_class(self->container, "prev-segment-container");
 
-    self->previous_segment_label = gtk_label_new(PREVIOUS_SEGMENT);
-    add_class(self->previous_segment_label, "prev-segment-label");
-    gtk_widget_set_halign(self->previous_segment_label,
-        GTK_ALIGN_START);
-    gtk_widget_set_hexpand(self->previous_segment_label, TRUE);
-    gtk_box_append(GTK_BOX(self->container),
-        self->previous_segment_label);
+	self->previous_segment_label = gtk_label_new(PREVIOUS_SEGMENT);
+	add_class(self->previous_segment_label, "prev-segment-label");
+	gtk_widget_set_halign(self->previous_segment_label, GTK_ALIGN_START);
+	gtk_widget_set_hexpand(self->previous_segment_label, TRUE);
+	gtk_box_append(GTK_BOX(self->container), self->previous_segment_label);
 
-    self->previous_segment = gtk_label_new(NULL);
-    add_class(self->previous_segment, "prev-segment");
-    gtk_widget_set_halign(self->previous_segment, GTK_ALIGN_END);
-    gtk_box_append(GTK_BOX(self->container), self->previous_segment);
+	self->previous_segment = gtk_label_new(NULL);
+	add_class(self->previous_segment, "prev-segment");
+	gtk_widget_set_halign(self->previous_segment, GTK_ALIGN_END);
+	gtk_box_append(GTK_BOX(self->container), self->previous_segment);
 
-    return (LSComponent*)self;
+	return (LSComponent *) self;
 }
 
 /**
@@ -56,10 +56,7 @@ LSComponent* ls_component_prev_segment_new(json_t* config)
  *
  * @param self The component to destroy
  */
-static void prev_segment_delete(LSComponent* self)
-{
-    free(self);
-}
+static void prev_segment_delete(LSComponent * self) { free(self); }
 
 /**
  * Returns the Previous Segment GTK widget.
@@ -67,9 +64,9 @@ static void prev_segment_delete(LSComponent* self)
  * @param self The Previous Segment component itself.
  * @return The container as a GTK Widget.
  */
-static GtkWidget* prev_segment_widget(LSComponent* self)
+static GtkWidget * prev_segment_widget(LSComponent * self)
 {
-    return ((LSPrevSegment*)self)->container;
+	return ((LSPrevSegment *) self)->container;
 }
 
 /**
@@ -79,13 +76,13 @@ static GtkWidget* prev_segment_widget(LSComponent* self)
  * @param game The game struct instance.
  * @param timer The timer instance.
  */
-static void prev_segment_show_game(LSComponent* self_,
-    const ls_game* game, const ls_timer* timer)
+static void prev_segment_show_game(
+	LSComponent * self_, ls_game const * game, ls_timer const * timer)
 {
-    LSPrevSegment* self = (LSPrevSegment*)self_;
-    remove_class(self->previous_segment, "behind");
-    remove_class(self->previous_segment, "losing");
-    remove_class(self->previous_segment, "best-segment");
+	LSPrevSegment * self = (LSPrevSegment *) self_;
+	remove_class(self->previous_segment, "behind");
+	remove_class(self->previous_segment, "losing");
+	remove_class(self->previous_segment, "best-segment");
 }
 
 /**
@@ -93,12 +90,12 @@ static void prev_segment_show_game(LSComponent* self_,
  *
  * @param self_ The prev-segment component itself.
  */
-static void prev_segment_clear_game(LSComponent* self_)
+static void prev_segment_clear_game(LSComponent * self_)
 {
-    LSPrevSegment* self = (LSPrevSegment*)self_;
-    gtk_label_set_text(GTK_LABEL(self->previous_segment_label),
-        PREVIOUS_SEGMENT);
-    gtk_label_set_text(GTK_LABEL(self->previous_segment), "");
+	LSPrevSegment * self = (LSPrevSegment *) self_;
+	gtk_label_set_text(
+		GTK_LABEL(self->previous_segment_label), PREVIOUS_SEGMENT);
+	gtk_label_set_text(GTK_LABEL(self->previous_segment), "");
 }
 
 /**
@@ -108,58 +105,68 @@ static void prev_segment_clear_game(LSComponent* self_)
  * @param game The game struct instance.
  * @param timer The timer instance.
  */
-static void prev_segment_draw(LSComponent* self_, const ls_game* game,
-    const ls_timer* timer)
+static void prev_segment_draw(
+	LSComponent * self_, ls_game const * game, ls_timer const * timer)
 {
-    LSPrevSegment* self = (LSPrevSegment*)self_;
-    const char* label;
-    char str[256];
-    unsigned int prev, curr = timer->curr_split ? timer->curr_split - 1 : 0;
-    if (game->split_count && curr == game->split_count) {
-        --curr;
-    }
+	LSPrevSegment * self = (LSPrevSegment *) self_;
+	char const * label;
+	char str[256];
+	unsigned int prev, curr = timer->curr_split ? timer->curr_split - 1 : 0;
+	if (game->split_count && curr == game->split_count) {
+		--curr;
+	}
 
-    remove_class(self->previous_segment, "best-segment");
-    remove_class(self->previous_segment, "behind");
-    remove_class(self->previous_segment, "losing");
-    remove_class(self->previous_segment, "delta");
-    gtk_label_set_text(GTK_LABEL(self->previous_segment), "-");
+	remove_class(self->previous_segment, "best-segment");
+	remove_class(self->previous_segment, "behind");
+	remove_class(self->previous_segment, "losing");
+	remove_class(self->previous_segment, "delta");
+	gtk_label_set_text(GTK_LABEL(self->previous_segment), "-");
 
-    label = PREVIOUS_SEGMENT;
-    if (timer->segment_deltas && ls_time_get_by_method(timer->segment_deltas[curr], game->comparison_method) > 0) {
-        // Live segment
-        label = LIVE_SEGMENT;
-        remove_class(self->previous_segment, "best-segment");
-        add_class(self->previous_segment, "behind");
-        add_class(self->previous_segment, "losing");
-        add_class(self->previous_segment, "delta");
-        ls_delta_string(str, ls_time_get_by_method(timer->segment_deltas[curr], game->comparison_method));
-        gtk_label_set_text(GTK_LABEL(self->previous_segment), str);
-    } else if (curr) {
-        // Previous segment
-        if (timer->curr_split) {
-            prev = timer->curr_split - 1;
-            if (timer->segment_deltas && ls_time_get_by_method(timer->segment_deltas[prev], game->comparison_method)) {
-                if (timer->split_info[prev]
-                    & LS_INFO_BEST_SEGMENT) {
-                    add_class(self->previous_segment, "best-segment");
-                } else if (ls_time_get_by_method(timer->segment_deltas[prev], game->comparison_method) > 0) {
-                    add_class(self->previous_segment, "behind");
-                    add_class(self->previous_segment, "losing");
-                }
-                add_class(self->previous_segment, "delta");
-                ls_delta_string(str, ls_time_get_by_method(timer->segment_deltas[prev], game->comparison_method));
-                gtk_label_set_text(GTK_LABEL(self->previous_segment), str);
-            }
-        }
-    }
-    gtk_label_set_text(GTK_LABEL(self->previous_segment_label), label);
+	label = PREVIOUS_SEGMENT;
+	if (timer->segment_deltas
+		&& ls_time_get_by_method(
+			   timer->segment_deltas[curr], game->comparison_method)
+			> 0) {
+		// Live segment
+		label = LIVE_SEGMENT;
+		remove_class(self->previous_segment, "best-segment");
+		add_class(self->previous_segment, "behind");
+		add_class(self->previous_segment, "losing");
+		add_class(self->previous_segment, "delta");
+		ls_delta_string(str,
+			ls_time_get_by_method(
+				timer->segment_deltas[curr], game->comparison_method));
+		gtk_label_set_text(GTK_LABEL(self->previous_segment), str);
+	}
+	else if (curr) {
+		// Previous segment
+		if (timer->curr_split) {
+			prev = timer->curr_split - 1;
+			if (timer->segment_deltas
+				&& ls_time_get_by_method(
+					timer->segment_deltas[prev], game->comparison_method)) {
+				if (timer->split_info[prev] & LS_INFO_BEST_SEGMENT) {
+					add_class(self->previous_segment, "best-segment");
+				}
+				else if (ls_time_get_by_method(timer->segment_deltas[prev],
+							 game->comparison_method)
+					> 0) {
+					add_class(self->previous_segment, "behind");
+					add_class(self->previous_segment, "losing");
+				}
+				add_class(self->previous_segment, "delta");
+				ls_delta_string(str,
+					ls_time_get_by_method(
+						timer->segment_deltas[prev], game->comparison_method));
+				gtk_label_set_text(GTK_LABEL(self->previous_segment), str);
+			}
+		}
+	}
+	gtk_label_set_text(GTK_LABEL(self->previous_segment_label), label);
 }
 
-LSComponentOps ls_prev_segment_operations = {
-    .delete = prev_segment_delete,
-    .widget = prev_segment_widget,
-    .show_game = prev_segment_show_game,
-    .clear_game = prev_segment_clear_game,
-    .draw = prev_segment_draw
-};
+LSComponentOps ls_prev_segment_operations = {.delete = prev_segment_delete,
+	.widget = prev_segment_widget,
+	.show_game = prev_segment_show_game,
+	.clear_game = prev_segment_clear_game,
+	.draw = prev_segment_draw};

@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int getModuleSize(lua_State* L);
+int getModuleSize(lua_State * L);

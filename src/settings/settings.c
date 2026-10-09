@@ -29,44 +29,44 @@
  * value into the ConfigEntry. Returns true on success, false on NULL
  * value or type mismatch.
  */
-static bool set_entry_from_json(ConfigEntry* e, json_t* v)
+static bool set_entry_from_json(ConfigEntry * e, json_t * v)
 {
-    if (!v)
-        return false;
-    switch (e->type) {
-        case CFG_BOOL:
-            if (!json_is_boolean(v))
-                return false;
-            e->value.b = json_is_true(v);
-            return true;
-        case CFG_CHOICE:
-            if (!json_is_integer(v))
-                return false;
-            for (int i = 0; e->choices[i] != NULL; ++i) {
-                if (json_integer_value(v) == i) {
-                    e->value.i = i;
-                    return true;
-                }
-            }
-            return false;
-        case CFG_INT:
-            if (!json_is_integer(v))
-                return false;
-            e->value.i = (int)json_integer_value(v);
-            return true;
-        case CFG_STRING:
-            if (!json_is_string(v))
-                return false;
-            strncpy(e->value.s, json_string_value(v), sizeof(e->value.s) - 1);
-            return true;
-        case CFG_KEYBIND:
-            // Keybinds are saved as strings
-            if (!json_is_string(v))
-                return false;
-            strncpy(e->value.s, json_string_value(v), sizeof(e->value.s) - 1);
-            return true;
-    }
-    return false;
+	if (!v)
+		return false;
+	switch (e->type) {
+		case CFG_BOOL:
+			if (!json_is_boolean(v))
+				return false;
+			e->value.b = json_is_true(v);
+			return true;
+		case CFG_CHOICE:
+			if (!json_is_integer(v))
+				return false;
+			for (int i = 0; e->choices[i] != NULL; ++i) {
+				if (json_integer_value(v) == i) {
+					e->value.i = i;
+					return true;
+				}
+			}
+			return false;
+		case CFG_INT:
+			if (!json_is_integer(v))
+				return false;
+			e->value.i = (int) json_integer_value(v);
+			return true;
+		case CFG_STRING:
+			if (!json_is_string(v))
+				return false;
+			strncpy(e->value.s, json_string_value(v), sizeof(e->value.s) - 1);
+			return true;
+		case CFG_KEYBIND:
+			// Keybinds are saved as strings
+			if (!json_is_string(v))
+				return false;
+			strncpy(e->value.s, json_string_value(v), sizeof(e->value.s) - 1);
+			return true;
+	}
+	return false;
 }
 
 /**
@@ -77,31 +77,34 @@ static bool set_entry_from_json(ConfigEntry* e, json_t* v)
  * json_null() for unknown types. Caller is responsible for managing
  * the returned reference
  */
-static json_t* json_from_entry(const ConfigEntry* e)
+static json_t * json_from_entry(ConfigEntry const * e)
 {
-    switch (e->type) {
-        case CFG_BOOL:
-            return json_pack("b", e->value.b);
-        case CFG_CHOICE:
-        case CFG_INT:
-            return json_pack("i", e->value.i);
-        case CFG_STRING:
-            return json_pack("s", e->value.s);
-        case CFG_KEYBIND:
-            return json_pack("s", e->value.s);
-        default:
-            printf("Unknown config entry type \"%d\". Returning null JSON field.\n", e->type);
-            break;
-    }
-    return json_null();
+	switch (e->type) {
+		case CFG_BOOL:
+			return json_pack("b", e->value.b);
+		case CFG_CHOICE:
+		case CFG_INT:
+			return json_pack("i", e->value.i);
+		case CFG_STRING:
+			return json_pack("s", e->value.s);
+		case CFG_KEYBIND:
+			return json_pack("s", e->value.s);
+		default:
+			printf("Unknown config entry type \"%d\". Returning null JSON "
+				   "field.\n",
+				e->type);
+			break;
+	}
+	return json_null();
 }
 
 /**
- * @brief Perform actions on the cfg after initialization successfully completes.
+ * @brief Perform actions on the cfg after initialization successfully
+ * completes.
  */
 static void post_init(void)
 {
-    cfg.libresplit.start_on_top.hide = !is_x11_display();
+	cfg.libresplit.start_on_top.hide = !is_x11_display();
 }
 
 /**
@@ -111,47 +114,49 @@ static void post_init(void)
  * then any present and correctly-typed values in the JSON override them.
  *
  * Returns true on success (including when the file is missing or not
- * a valid JSON object since it will return defaults), false on unrecoverable errors.
+ * a valid JSON object since it will return defaults), false on unrecoverable
+ * errors.
  */
 bool config_init(void)
 {
-    char path[PATH_MAX] = { 0 };
-    get_libresplit_folder_path(path);
-    strcat(path, "/settings.json");
+	char path[PATH_MAX] = {0};
+	get_libresplit_folder_path(path);
+	strcat(path, "/settings.json");
 
-    // cfg is already initialized with defaults
-    // so we just have to overwrite them
+	// cfg is already initialized with defaults
+	// so we just have to overwrite them
 
-    json_error_t err;
-    json_t* root = json_load_file(path, 0, &err);
-    if (!root) {
-        /* Could not load JSON -> keep defaults */
-        return true;
-    }
+	json_error_t err;
+	json_t * root = json_load_file(path, 0, &err);
+	if (!root) {
+		/* Could not load JSON -> keep defaults */
+		return true;
+	}
 
-    if (!json_is_object(root)) {
-        json_decref(root);
-        return true;
-    }
+	if (!json_is_object(root)) {
+		json_decref(root);
+		return true;
+	}
 
-    for (size_t s = 0; s < sections_count; ++s) {
-        const SectionInfo* sec = &sections[s];
-        json_t* sec_obj = json_object_get(root, sec->name);
-        if (!sec_obj || !json_is_object(sec_obj))
-            continue; // leave defaults for this section
+	for (size_t s = 0; s < sections_count; ++s) {
+		SectionInfo const * sec = &sections[s];
+		json_t * sec_obj = json_object_get(root, sec->name);
+		if (!sec_obj || !json_is_object(sec_obj))
+			continue; // leave defaults for this section
 
-        for (size_t i = 0; i < sec->count; ++i) {
-            ConfigEntry* e = (ConfigEntry*)((char*)sec->entries + (sizeof(ConfigEntry) * i));
-            json_t* v = json_object_get(sec_obj, e->key);
-            if (!set_entry_from_json(e, v)) {
-                // invalid or missing, keep default
-            }
-        }
-    }
+		for (size_t i = 0; i < sec->count; ++i) {
+			ConfigEntry * e = (ConfigEntry *) ((char *) sec->entries
+				+ (sizeof(ConfigEntry) * i));
+			json_t * v = json_object_get(sec_obj, e->key);
+			if (!set_entry_from_json(e, v)) {
+				// invalid or missing, keep default
+			}
+		}
+	}
 
-    json_decref(root);
-    post_init();
-    return true;
+	json_decref(root);
+	post_init();
+	return true;
 }
 
 /**
@@ -165,33 +170,35 @@ bool config_init(void)
  */
 bool config_save(void)
 {
-    json_t* root = json_object();
-    if (!root)
-        return false;
+	json_t * root = json_object();
+	if (!root)
+		return false;
 
-    for (size_t s = 0; s < sections_count; ++s) {
-        const SectionInfo* sec = &sections[s];
-        json_t* sec_obj = json_object();
-        for (size_t i = 0; i < sec->count; ++i) {
-            ConfigEntry* e = (ConfigEntry*)((char*)sec->entries + (sizeof(ConfigEntry) * i));
-            json_t* v = json_from_entry(e);
-            if (v && !json_is_null(v))
-                json_object_set_new(sec_obj, e->key, v);
-            else {
-                printf("Cannot save field \"%s\" with type \"%d\"\n", e->key, e->type);
-                if (v)
-                    json_decref(v);
-            }
-        }
-        json_object_set_new(root, sec->name, sec_obj);
-    }
+	for (size_t s = 0; s < sections_count; ++s) {
+		SectionInfo const * sec = &sections[s];
+		json_t * sec_obj = json_object();
+		for (size_t i = 0; i < sec->count; ++i) {
+			ConfigEntry * e = (ConfigEntry *) ((char *) sec->entries
+				+ (sizeof(ConfigEntry) * i));
+			json_t * v = json_from_entry(e);
+			if (v && !json_is_null(v))
+				json_object_set_new(sec_obj, e->key, v);
+			else {
+				printf("Cannot save field \"%s\" with type \"%d\"\n", e->key,
+					e->type);
+				if (v)
+					json_decref(v);
+			}
+		}
+		json_object_set_new(root, sec->name, sec_obj);
+	}
 
-    char path[PATH_MAX] = { 0 };
-    get_libresplit_folder_path(path);
-    strcat(path, "/settings.json");
+	char path[PATH_MAX] = {0};
+	get_libresplit_folder_path(path);
+	strcat(path, "/settings.json");
 
-    check_directories();
-    int ret = json_dump_file(root, path, JSON_INDENT(2) | JSON_PRESERVE_ORDER);
-    json_decref(root);
-    return ret == 0;
+	check_directories();
+	int ret = json_dump_file(root, path, JSON_INDENT(2) | JSON_PRESERVE_ORDER);
+	json_decref(root);
+	return ret == 0;
 }

@@ -12,7 +12,7 @@ extern int refresh_rate;
 extern bool use_game_time;
 extern atomic_bool update_game_time;
 extern atomic_llong game_time_value;
-extern lasr_global* shared_globals;
+extern lasr_global * shared_globals;
 extern int maps_cache_cycles;
 extern atomic_bool auto_splitter_enabled;
 extern atomic_bool auto_splitter_running;
@@ -33,30 +33,30 @@ extern bool prev_is_loading;
  * towards the auto splitter
  */
 enum TimerEvent {
-    TIMER_EVT_START = 1 << 0,
-    TIMER_EVT_SPLIT = 1 << 1,
-    TIMER_EVT_STOP = 1 << 2,
-    TIMER_EVT_RESET = 1 << 3,
-    TIMER_EVT_CANCEL = 1 << 4,
-    TIMER_EVT_SKIP = 1 << 5,
-    TIMER_EVT_UNSPLIT = 1 << 6,
-    TIMER_EVT_PAUSE = 1 << 7,
-    TIMER_EVT_UNPAUSE = 1 << 8,
+	TIMER_EVT_START = 1 << 0,
+	TIMER_EVT_SPLIT = 1 << 1,
+	TIMER_EVT_STOP = 1 << 2,
+	TIMER_EVT_RESET = 1 << 3,
+	TIMER_EVT_CANCEL = 1 << 4,
+	TIMER_EVT_SKIP = 1 << 5,
+	TIMER_EVT_UNSPLIT = 1 << 6,
+	TIMER_EVT_PAUSE = 1 << 7,
+	TIMER_EVT_UNPAUSE = 1 << 8,
 };
 
 /**
  * Defines a Lua Auto Splitter Runtime Function.
  */
 struct lasr_function {
-    char* function_name; /*!< The name of the function in Lua */
-    lua_CFunction function_ptr; /*!< C Function to be executed */
+	char * function_name;		/*!< The name of the function in Lua */
+	lua_CFunction function_ptr; /*!< C Function to be executed */
 } typedef lasr_function;
 
 typedef struct _ExternalLASRFunctionRegistry {
-    int count;
-    int size;
-    lasr_function* functions;
-    bool enabled;
+	int count;
+	int size;
+	lasr_function * functions;
+	bool enabled;
 } ExternalLASRFunctionRegistry;
 
 void init_auto_splitter(void);

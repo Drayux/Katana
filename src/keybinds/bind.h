@@ -28,25 +28,20 @@
 
 G_BEGIN_DECLS
 
-typedef void (*KeybinderHandler)(const char* keystring, void* user_data);
+typedef void (*KeybinderHandler)(char const * keystring, void * user_data);
 
 void keybinder_init(void);
 void keybinder_dispose(void);
 
-gboolean keybinder_bind(const char* keystring,
-    KeybinderHandler handler,
-    void* user_data);
+gboolean keybinder_bind(
+	char const * keystring, KeybinderHandler handler, void * user_data);
 
-gboolean
-keybinder_bind_full(const char* keystring,
-    KeybinderHandler handler,
-    void* user_data,
-    GDestroyNotify notify);
+gboolean keybinder_bind_full(char const * keystring, KeybinderHandler handler,
+	void * user_data, GDestroyNotify notify);
 
-void keybinder_unbind(const char* keystring,
-    KeybinderHandler handler);
+void keybinder_unbind(char const * keystring, KeybinderHandler handler);
 
-void keybinder_unbind_all(const char* keystring);
+void keybinder_unbind_all(char const * keystring);
 
 guint32 keybinder_get_current_event_time(void);
 

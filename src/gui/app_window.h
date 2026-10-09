@@ -19,70 +19,77 @@ typedef struct ls_runs ls_runs;
 
 G_DECLARE_FINAL_TYPE(LSApp, ls_app, LS, APP, GtkApplication)
 #define LS_APP_TYPE (ls_app_get_type())
-#define LS_APP(obj) \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), LS_APP_TYPE, LSApp))
+#define LS_APP(obj) (G_TYPE_CHECK_INSTANCE_CAST((obj), LS_APP_TYPE, LSApp))
 
-G_DECLARE_FINAL_TYPE(LSAppWindow, ls_app_window, LS, APP_WINDOW, GtkApplicationWindow)
+G_DECLARE_FINAL_TYPE(
+	LSAppWindow, ls_app_window, LS, APP_WINDOW, GtkApplicationWindow)
 
 #define LS_APP_WINDOW_TYPE (ls_app_window_get_type())
-#define LS_APP_WINDOW(obj) \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), LS_APP_WINDOW_TYPE, LSAppWindow))
+#define LS_APP_WINDOW(obj)                                                     \
+	(G_TYPE_CHECK_INSTANCE_CAST((obj), LS_APP_WINDOW_TYPE, LSAppWindow))
 
 struct _LSAppWindowClass {
-    GtkApplicationWindowClass parent_class;
+	GtkApplicationWindowClass parent_class;
 };
 
 struct _LSApp {
-    GtkApplication parent;
+	GtkApplication parent;
 };
 
 struct _LSAppClass {
-    GtkApplicationClass parent_class;
+	GtkApplicationClass parent_class;
 };
 
 /**
  * @brief The main LibreSplit application window
  */
 typedef struct _LSAppWindow {
-    GtkApplicationWindow parent; /*!< The proper GTK base application*/
-    char data_path[PATH_MAX]; /*!< The path to the libresplit user config directory */
-    ls_game* game;
-    ls_timer* timer;
-    ls_runs* runs;
-    GdkDisplay* display;
-    GtkWidget* container;
-    LSWelcomeBox* welcome_box;
-    GtkWidget* box;
-    GtkWidget* context_menu; /*!< The context menu */
-    bool resize_cursor_hover; /*!< True when the user is mousing over the resize edge of an undecorated window */
-    GdkSurfaceEdge resize_cursor_edge; /*!< The edge the user is mousing over */
-    GList* components;
-    GtkWidget* footer;
-    GtkCssProvider* reset_style; /*!< The "reset rules" provider, will remove desktop theme rules */
-    GtkCssProvider* style; /*!< Current style provider, there can be only one */
-    GtkCssProvider* style_variant; /*!< Current style variant provider based on the main style, there can only be one*/
-    guint step_source_id; /*!< Source ID for the run clock callback */
-    guint draw_source_id; /*!< Source ID for the gui draw callback */
-    bool global_hotkeys_initialized; /*!< Whether global hotkeys have been binded */
-    LSKeybinds keybinds; /*!< The keybinds related to this application window */
-    LSOpts opts; /*!< The window options */
+	GtkApplicationWindow parent; /*!< The proper GTK base application*/
+	char data_path[PATH_MAX];	 /*!< The path to the libresplit user config
+									directory */
+	ls_game * game;
+	ls_timer * timer;
+	ls_runs * runs;
+	GdkDisplay * display;
+	GtkWidget * container;
+	LSWelcomeBox * welcome_box;
+	GtkWidget * box;
+	GtkWidget * context_menu; /*!< The context menu */
+	bool resize_cursor_hover; /*!< True when the user is mousing over the resize
+								 edge of an undecorated window */
+	GdkSurfaceEdge resize_cursor_edge; /*!< The edge the user is mousing over */
+	GList * components;
+	GtkWidget * footer;
+	GtkCssProvider * reset_style; /*!< The "reset rules" provider, will remove
+									 desktop theme rules */
+	GtkCssProvider *
+		style; /*!< Current style provider, there can be only one */
+	GtkCssProvider * style_variant; /*!< Current style variant provider based on
+									   the main style, there can only be one*/
+	guint step_source_id;			/*!< Source ID for the run clock callback */
+	guint draw_source_id;			/*!< Source ID for the gui draw callback */
+	bool global_hotkeys_initialized; /*!< Whether global hotkeys have been
+										binded */
+	LSKeybinds keybinds; /*!< The keybinds related to this application window */
+	LSOpts opts;		 /*!< The window options */
 } LSAppWindow;
 
-void set_window_decorations(LSAppWindow* win);
-void toggle_decorations(LSAppWindow* win);
-void toggle_win_on_top(LSAppWindow* win);
+void set_window_decorations(LSAppWindow * win);
+void toggle_decorations(LSAppWindow * win);
+void toggle_win_on_top(LSAppWindow * win);
 
-LSAppWindow* ls_get_main_app_window(void);
-LSAppWindow* ls_app_window_get_default(LSApp* app);
-void ls_app_startup(GApplication* app);
-void ls_app_activate(GApplication* app);
-void ls_app_open(GApplication* app, GFile** files, gint n_files, const gchar* hint);
-LSApp* ls_app_new(void);
+LSAppWindow * ls_get_main_app_window(void);
+LSAppWindow * ls_app_window_get_default(LSApp * app);
+void ls_app_startup(GApplication * app);
+void ls_app_activate(GApplication * app);
+void ls_app_open(
+	GApplication * app, GFile ** files, gint n_files, gchar const * hint);
+LSApp * ls_app_new(void);
 
-void ls_app_window_open(LSAppWindow* win, const char* file);
+void ls_app_window_open(LSAppWindow * win, char const * file);
 
 gboolean ls_app_window_step(gpointer data);
 gboolean ls_app_window_quit(gpointer window);
-void ls_app_window_destroy(GtkWidget* widget, gpointer data);
+void ls_app_window_destroy(GtkWidget * widget, gpointer data);
 void ls_app_window_set_blocked(gboolean block_window);
 gboolean ls_app_window_draw(gpointer data);

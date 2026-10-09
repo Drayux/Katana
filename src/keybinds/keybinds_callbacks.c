@@ -2,39 +2,36 @@
 #include "gui/timer.h"
 #include "keybinds/bind.h"
 
-void keybind_start_split(GtkWidget* widget, LSAppWindow* win)
+void keybind_start_split(GtkWidget * widget, LSAppWindow * win)
 {
-    timer_start_split(win);
+	timer_start_split(win);
 }
 
-void keybind_stop_reset(const char* str, LSAppWindow* win)
+void keybind_stop_reset(char const * str, LSAppWindow * win)
 {
-    timer_stop_or_reset(win);
+	timer_stop_or_reset(win);
 }
 
-void keybind_cancel(const char* str, LSAppWindow* win)
+void keybind_cancel(char const * str, LSAppWindow * win)
 {
-    timer_cancel_run(win);
+	timer_cancel_run(win);
 }
 
-void keybind_skip(const char* str, LSAppWindow* win)
+void keybind_skip(char const * str, LSAppWindow * win) { timer_skip(win); }
+
+void keybind_unsplit(char const * str, LSAppWindow * win)
 {
-    timer_skip(win);
+	timer_unsplit(win);
 }
 
-void keybind_unsplit(const char* str, LSAppWindow* win)
+void keybind_toggle_decorations(char const * str, LSAppWindow * win)
 {
-    timer_unsplit(win);
+	toggle_decorations(win);
 }
 
-void keybind_toggle_decorations(const char* str, LSAppWindow* win)
+void keybind_toggle_win_on_top(char const * str, LSAppWindow * win)
 {
-    toggle_decorations(win);
-}
-
-void keybind_toggle_win_on_top(const char* str, LSAppWindow* win)
-{
-    toggle_win_on_top(win);
+	toggle_win_on_top(win);
 }
 
 /**
@@ -48,7 +45,8 @@ void keybind_toggle_win_on_top(const char* str, LSAppWindow* win)
  */
 static int keybind_match(Keybind kb, guint keyval, GdkModifierType state)
 {
-    return keyval == kb.key && kb.mods == (state & gtk_accelerator_get_default_mod_mask());
+	return keyval == kb.key
+		&& kb.mods == (state & gtk_accelerator_get_default_mod_mask());
 }
 
 /**
@@ -59,65 +57,56 @@ static int keybind_match(Keybind kb, guint keyval, GdkModifierType state)
  * @param keycode The actual keycode of the pressed key.
  * @param state The active keyboard modifier flags.
  * @param data The main LSAppWindow.
- * @return gboolean Whether or not we handled the keypress event. Returning FALSE allows GTK to continue regular handling propagation.
+ * @return gboolean Whether or not we handled the keypress event. Returning
+ * FALSE allows GTK to continue regular handling propagation.
  */
-gboolean ls_app_window_keypress(GtkEventControllerKey* controller,
-    guint keyval,
-    guint keycode,
-    GdkModifierType state,
-    gpointer data)
+gboolean ls_app_window_keypress(GtkEventControllerKey * controller,
+	guint keyval, guint keycode, GdkModifierType state, gpointer data)
 {
-    LSAppWindow* win = (LSAppWindow*)data;
-    if (keybind_match(win->keybinds.start_split, keyval, state)) {
-        timer_start_split(win);
-    } else if (keybind_match(win->keybinds.stop_reset, keyval, state)) {
-        timer_stop_or_reset(win);
-    } else if (keybind_match(win->keybinds.cancel, keyval, state)) {
-        timer_cancel_run(win);
-    } else if (keybind_match(win->keybinds.unsplit, keyval, state)) {
-        timer_unsplit(win);
-    } else if (keybind_match(win->keybinds.skip_split, keyval, state)) {
-        timer_skip(win);
-    } else if (keybind_match(win->keybinds.toggle_decorations, keyval, state)) {
-        toggle_decorations(win);
-    } else if (keybind_match(win->keybinds.toggle_win_on_top, keyval, state)) {
-        toggle_win_on_top(win);
-    } else {
-        return FALSE;
-    }
+	LSAppWindow * win = (LSAppWindow *) data;
+	if (keybind_match(win->keybinds.start_split, keyval, state)) {
+		timer_start_split(win);
+	}
+	else if (keybind_match(win->keybinds.stop_reset, keyval, state)) {
+		timer_stop_or_reset(win);
+	}
+	else if (keybind_match(win->keybinds.cancel, keyval, state)) {
+		timer_cancel_run(win);
+	}
+	else if (keybind_match(win->keybinds.unsplit, keyval, state)) {
+		timer_unsplit(win);
+	}
+	else if (keybind_match(win->keybinds.skip_split, keyval, state)) {
+		timer_skip(win);
+	}
+	else if (keybind_match(win->keybinds.toggle_decorations, keyval, state)) {
+		toggle_decorations(win);
+	}
+	else if (keybind_match(win->keybinds.toggle_win_on_top, keyval, state)) {
+		toggle_win_on_top(win);
+	}
+	else {
+		return FALSE;
+	}
 
-    return TRUE;
+	return TRUE;
 }
 
-void bind_global_hotkeys(AppConfig cfg, LSAppWindow* win)
+void bind_global_hotkeys(AppConfig cfg, LSAppWindow * win)
 {
-    keybinder_init();
-    keybinder_bind(
-        cfg.keybinds.start_split.value.s,
-        (KeybinderHandler)keybind_start_split,
-        win);
-    keybinder_bind(
-        cfg.keybinds.stop_reset.value.s,
-        (KeybinderHandler)keybind_stop_reset,
-        win);
-    keybinder_bind(
-        cfg.keybinds.cancel.value.s,
-        (KeybinderHandler)keybind_cancel,
-        win);
-    keybinder_bind(
-        cfg.keybinds.unsplit.value.s,
-        (KeybinderHandler)keybind_unsplit,
-        win);
-    keybinder_bind(
-        cfg.keybinds.skip_split.value.s,
-        (KeybinderHandler)keybind_skip,
-        win);
-    keybinder_bind(
-        cfg.keybinds.toggle_decorations.value.s,
-        (KeybinderHandler)keybind_toggle_decorations,
-        win);
-    keybinder_bind(
-        cfg.keybinds.toggle_win_on_top.value.s,
-        (KeybinderHandler)keybind_toggle_win_on_top,
-        win);
+	keybinder_init();
+	keybinder_bind(cfg.keybinds.start_split.value.s,
+		(KeybinderHandler) keybind_start_split, win);
+	keybinder_bind(cfg.keybinds.stop_reset.value.s,
+		(KeybinderHandler) keybind_stop_reset, win);
+	keybinder_bind(
+		cfg.keybinds.cancel.value.s, (KeybinderHandler) keybind_cancel, win);
+	keybinder_bind(
+		cfg.keybinds.unsplit.value.s, (KeybinderHandler) keybind_unsplit, win);
+	keybinder_bind(
+		cfg.keybinds.skip_split.value.s, (KeybinderHandler) keybind_skip, win);
+	keybinder_bind(cfg.keybinds.toggle_decorations.value.s,
+		(KeybinderHandler) keybind_toggle_decorations, win);
+	keybinder_bind(cfg.keybinds.toggle_win_on_top.value.s,
+		(KeybinderHandler) keybind_toggle_win_on_top, win);
 }

@@ -6,9 +6,10 @@
 #include <string.h>
 #include <sys/stat.h>
 
-static const char reset_rules[] = ".window.main-window{ all: unset; }\n"
-                                  ".window.main-window .libresplit-content,\n"
-                                  ".window.main-window .libresplit-content * { all: unset; }";
+static char const reset_rules[] =
+	".window.main-window{ all: unset; }\n"
+	".window.main-window .libresplit-content,\n"
+	".window.main-window .libresplit-content * { all: unset; }";
 
 /**
  * Captures CSS loading errors the same way GTK 3's GError parameter did.
@@ -18,31 +19,29 @@ static const char reset_rules[] = ".window.main-window{ all: unset; }\n"
  * @param error The parsing error or warning.
  * @param data The GError pointer that receives the first error.
  */
-static void capture_css_error(GtkCssProvider* provider,
-    GtkCssSection* section,
-    const GError* error,
-    gpointer data)
+static void capture_css_error(GtkCssProvider * provider,
+	GtkCssSection * section, GError const * error, gpointer data)
 {
-    GError** gerror = data;
-    char* location;
+	GError ** gerror = data;
+	char * location;
 
-    if (error->domain == GTK_CSS_PARSER_WARNING) {
-        location = gtk_css_section_to_string(section);
-        g_warning("Theme parsing error: %s: %s", location, error->message);
-        g_free(location);
-        return;
-    }
+	if (error->domain == GTK_CSS_PARSER_WARNING) {
+		location = gtk_css_section_to_string(section);
+		g_warning("Theme parsing error: %s: %s", location, error->message);
+		g_free(location);
+		return;
+	}
 
-    if (*gerror != NULL) {
-        return;
-    }
+	if (*gerror != NULL) {
+		return;
+	}
 
-    *gerror = g_error_copy(error);
-    if (section != NULL) {
-        location = gtk_css_section_to_string(section);
-        g_prefix_error(gerror, "%s", location);
-        g_free(location);
-    }
+	*gerror = g_error_copy(error);
+	if (section != NULL) {
+		location = gtk_css_section_to_string(section);
+		g_prefix_error(gerror, "%s", location);
+		g_free(location);
+	}
 }
 
 /**
@@ -55,35 +54,33 @@ static void capture_css_error(GtkCssProvider* provider,
  *
  * @return 1 if the load is successful, 0 otherwise.
  */
-int ls_app_window_find_theme(const LSAppWindow* win,
-    const char* name,
-    const char* variant,
-    char* out_path)
+int ls_app_window_find_theme(LSAppWindow const * win, char const * name,
+	char const * variant, char * out_path)
 {
-    if (!name || !strlen(name)) {
-        out_path[0] = '\0';
-        return 0;
-    }
+	if (!name || !strlen(name)) {
+		out_path[0] = '\0';
+		return 0;
+	}
 
-    char theme_path[PATH_MAX];
-    strcpy(theme_path, "/");
-    strcat(theme_path, name);
-    strcat(theme_path, "/");
-    strcat(theme_path, name);
-    if (variant && strlen(variant)) {
-        strcat(theme_path, "-");
-        strcat(theme_path, variant);
-    }
-    strcat(theme_path, ".css");
+	char theme_path[PATH_MAX];
+	strcpy(theme_path, "/");
+	strcat(theme_path, name);
+	strcat(theme_path, "/");
+	strcat(theme_path, name);
+	if (variant && strlen(variant)) {
+		strcat(theme_path, "-");
+		strcat(theme_path, variant);
+	}
+	strcat(theme_path, ".css");
 
-    strcpy(out_path, win->data_path);
-    strcat(out_path, "/themes");
-    strcat(out_path, theme_path);
-    struct stat st = { 0 };
-    if (stat(out_path, &st) == -1) {
-        return 0;
-    }
-    return 1;
+	strcpy(out_path, win->data_path);
+	strcat(out_path, "/themes");
+	strcat(out_path, theme_path);
+	struct stat st = {0};
+	if (stat(out_path, &st) == -1) {
+		return 0;
+	}
+	return 1;
 }
 
 /**
@@ -94,16 +91,16 @@ int ls_app_window_find_theme(const LSAppWindow* win,
  *
  * @return true if an error occurred
  */
-static void apply_reset_rules(LSAppWindow* win, GError** gerror)
+static void apply_reset_rules(LSAppWindow * win, GError ** gerror)
 {
-    gtk_style_context_add_provider_for_display(
-        win->display,
-        GTK_STYLE_PROVIDER(win->reset_style),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    gulong error_handler = g_signal_connect(win->reset_style,
-        "parsing-error", G_CALLBACK(capture_css_error), gerror);
-    gtk_css_provider_load_from_string(GTK_CSS_PROVIDER(win->reset_style), reset_rules);
-    g_signal_handler_disconnect(win->reset_style, error_handler);
+	gtk_style_context_add_provider_for_display(win->display,
+		GTK_STYLE_PROVIDER(win->reset_style),
+		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	gulong error_handler = g_signal_connect(win->reset_style, "parsing-error",
+		G_CALLBACK(capture_css_error), gerror);
+	gtk_css_provider_load_from_string(
+		GTK_CSS_PROVIDER(win->reset_style), reset_rules);
+	g_signal_handler_disconnect(win->reset_style, error_handler);
 }
 
 /**
@@ -118,45 +115,54 @@ static void apply_reset_rules(LSAppWindow* win, GError** gerror)
  * @param variant Optional name of the theme variant.
  * @return bool Whether or not the theme was found and parsed without error.
  */
-static bool load_theme_css(const LSAppWindow* win, GtkCssProvider* provider, const char* name, const char* variant)
+static bool load_theme_css(LSAppWindow const * win, GtkCssProvider * provider,
+	char const * name, char const * variant)
 {
-    char path[PATH_MAX];
-    if (!ls_app_window_find_theme(win, name, variant, path)) {
-        const char* msg = variant ? "Your main theme was applied but we could not find your variant" : "Your main theme was not found";
-        ls_alert_info(GTK_WINDOW(win), "LibreSplit", "Theme Not Found", msg);
-        LOG_WARNF("Theme not found: \"%s\" (variant: \"%s\")", name ? name : "", variant ? variant : "");
-        return false;
-    }
+	char path[PATH_MAX];
+	if (!ls_app_window_find_theme(win, name, variant, path)) {
+		char const * msg = variant
+			? "Your main theme was applied but we could not find your variant"
+			: "Your main theme was not found";
+		ls_alert_info(GTK_WINDOW(win), "LibreSplit", "Theme Not Found", msg);
+		LOG_WARNF("Theme not found: \"%s\" (variant: \"%s\")", name ? name : "",
+			variant ? variant : "");
+		return false;
+	}
 
-    GError* error = NULL;
-    gulong error_handler = g_signal_connect(provider, "parsing-error", G_CALLBACK(capture_css_error), &error);
-    gtk_css_provider_load_from_path(provider, path);
-    g_signal_handler_disconnect(provider, error_handler);
-    if (error != NULL) {
-        const char* msg = variant
-            ? "Your main theme was applied but your variant had an error which prevented it from loading"
-            : "Your main theme had an error which prevented it from loading";
+	GError * error = NULL;
+	gulong error_handler = g_signal_connect(
+		provider, "parsing-error", G_CALLBACK(capture_css_error), &error);
+	gtk_css_provider_load_from_path(provider, path);
+	g_signal_handler_disconnect(provider, error_handler);
+	if (error != NULL) {
+		char const * msg = variant
+			? "Your main theme was applied but your variant had an error which "
+			  "prevented it from loading"
+			: "Your main theme had an error which prevented it from loading";
 
-        ls_alert_info(GTK_WINDOW(win), "LibreSplit", "Theme Not Found", msg);
-        LOG_ERRF("Error loading custom theme \"%s\" (variant: \"%s\"): %s", name ? name : "", variant ? variant : "", error->message);
-        g_error_free(error);
-        return false;
-    }
+		ls_alert_info(GTK_WINDOW(win), "LibreSplit", "Theme Not Found", msg);
+		LOG_ERRF("Error loading custom theme \"%s\" (variant: \"%s\"): %s",
+			name ? name : "", variant ? variant : "", error->message);
+		g_error_free(error);
+		return false;
+	}
 
-    return true;
+	return true;
 }
 
-static void load_fallback_theme(LSAppWindow* win)
+static void load_fallback_theme(LSAppWindow * win)
 {
-    GError* gerror = NULL;
-    gulong error_handler = g_signal_connect(win->style, "parsing-error", G_CALLBACK(capture_css_error), &gerror);
-    gtk_css_provider_load_from_resource(GTK_CSS_PROVIDER(win->style), LIBRESPLIT_RESOURCES_PREFIX "fallback.css");
-    g_signal_handler_disconnect(win->style, error_handler);
-    if (gerror != NULL) {
-        g_printerr("Error loading default theme CSS: %s\n", gerror->message);
-        g_error_free(gerror);
-        gerror = NULL;
-    }
+	GError * gerror = NULL;
+	gulong error_handler = g_signal_connect(
+		win->style, "parsing-error", G_CALLBACK(capture_css_error), &gerror);
+	gtk_css_provider_load_from_resource(GTK_CSS_PROVIDER(win->style),
+		LIBRESPLIT_RESOURCES_PREFIX "fallback.css");
+	g_signal_handler_disconnect(win->style, error_handler);
+	if (gerror != NULL) {
+		g_printerr("Error loading default theme CSS: %s\n", gerror->message);
+		g_error_free(gerror);
+		gerror = NULL;
+	}
 }
 
 /**
@@ -166,64 +172,67 @@ static void load_fallback_theme(LSAppWindow* win)
  * @param name The name of the theme to load.
  * @param variant The variant of the theme to load.
  */
-void ls_app_load_theme_with_fallback(LSAppWindow* win, const char* name, const char* variant)
+void ls_app_load_theme_with_fallback(
+	LSAppWindow * win, char const * name, char const * variant)
 {
-    LOG_DEBUG("Loading Theme...");
+	LOG_DEBUG("Loading Theme...");
 
-    // Remove old variant
-    if (win->style_variant) {
-        gtk_style_context_remove_provider_for_display(win->display, GTK_STYLE_PROVIDER(win->style_variant));
-        g_object_unref(win->style_variant);
-        win->style_variant = NULL;
-    }
+	// Remove old variant
+	if (win->style_variant) {
+		gtk_style_context_remove_provider_for_display(
+			win->display, GTK_STYLE_PROVIDER(win->style_variant));
+		g_object_unref(win->style_variant);
+		win->style_variant = NULL;
+	}
 
-    // Remove old style
-    if (win->style) {
-        gtk_style_context_remove_provider_for_display(win->display, GTK_STYLE_PROVIDER(win->style));
-        g_object_unref(win->style);
-        win->style = NULL;
-    }
+	// Remove old style
+	if (win->style) {
+		gtk_style_context_remove_provider_for_display(
+			win->display, GTK_STYLE_PROVIDER(win->style));
+		g_object_unref(win->style);
+		win->style = NULL;
+	}
 
-    GError* gerror = NULL;
+	GError * gerror = NULL;
 
-    // If reset rules have never been loaded, create them
-    if (!win->reset_style) {
-        win->reset_style = gtk_css_provider_new();
-        apply_reset_rules(win, &gerror);
-        if (gerror != NULL) {
-            g_printerr("Error loading theme reset Rules: %s\n", gerror->message);
-            g_error_free(gerror);
-            gerror = NULL;
-        }
-    }
+	// If reset rules have never been loaded, create them
+	if (!win->reset_style) {
+		win->reset_style = gtk_css_provider_new();
+		apply_reset_rules(win, &gerror);
+		if (gerror != NULL) {
+			g_printerr(
+				"Error loading theme reset Rules: %s\n", gerror->message);
+			g_error_free(gerror);
+			gerror = NULL;
+		}
+	}
 
-    if (!win->style) {
-        win->style = gtk_css_provider_new();
-        gtk_style_context_add_provider_for_display(
-            win->display,
-            GTK_STYLE_PROVIDER(win->style),
-            GTK_STYLE_PROVIDER_PRIORITY_USER_THEME);
-    }
+	if (!win->style) {
+		win->style = gtk_css_provider_new();
+		gtk_style_context_add_provider_for_display(win->display,
+			GTK_STYLE_PROVIDER(win->style),
+			GTK_STYLE_PROVIDER_PRIORITY_USER_THEME);
+	}
 
-    // only try to load the theme if one is actually defined.
-    if (!name || name[0] == '\0' || !load_theme_css(win, win->style, name, NULL)) {
-        // Load default theme from embedded CSS as fallback
-        load_fallback_theme(win);
-        return;
-    }
+	// only try to load the theme if one is actually defined.
+	if (!name || name[0] == '\0'
+		|| !load_theme_css(win, win->style, name, NULL)) {
+		// Load default theme from embedded CSS as fallback
+		load_fallback_theme(win);
+		return;
+	}
 
-    if (variant && variant[0]) {
-        win->style_variant = gtk_css_provider_new();
-        if (!load_theme_css(win, win->style_variant, name, variant)) {
-            g_clear_object(&win->style_variant);
-            return;
-        }
+	if (variant && variant[0]) {
+		win->style_variant = gtk_css_provider_new();
+		if (!load_theme_css(win, win->style_variant, name, variant)) {
+			g_clear_object(&win->style_variant);
+			return;
+		}
 
-        gtk_style_context_add_provider_for_display(
-            win->display,
-            GTK_STYLE_PROVIDER(win->style_variant),
-            GTK_STYLE_PROVIDER_PRIORITY_USER_THEME_VARIANT);
-    }
+		gtk_style_context_add_provider_for_display(win->display,
+			GTK_STYLE_PROVIDER(win->style_variant),
+			GTK_STYLE_PROVIDER_PRIORITY_USER_THEME_VARIANT);
+	}
 }
 
 /**
@@ -236,10 +245,13 @@ void ls_app_load_theme_with_fallback(LSAppWindow* win, const char* name, const c
  */
 void ls_app_set_appearance(Appearance appearance)
 {
-    GtkSettings* settings = gtk_settings_get_default();
-    if (appearance == APPEARANCE_SYSTEM) {
-        gtk_settings_reset_property(settings, "gtk-application-prefer-dark-theme");
-    } else {
-        g_object_set(settings, "gtk-application-prefer-dark-theme", appearance == APPEARANCE_DARK, NULL);
-    }
+	GtkSettings * settings = gtk_settings_get_default();
+	if (appearance == APPEARANCE_SYSTEM) {
+		gtk_settings_reset_property(
+			settings, "gtk-application-prefer-dark-theme");
+	}
+	else {
+		g_object_set(settings, "gtk-application-prefer-dark-theme",
+			appearance == APPEARANCE_DARK, NULL);
+	}
 }

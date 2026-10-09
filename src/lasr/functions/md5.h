@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int md5sum(lua_State* L);
+int md5sum(lua_State * L);

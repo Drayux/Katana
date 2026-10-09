@@ -1,6 +1,8 @@
 Contributing
 ============
 
+_TODO: Move this to a development guide, rather than the contribution guidelines. Include detailed building steps and options as well (like logging levels, debug/release, etc.)_
+
 Coding Style
 ------------
 
@@ -18,13 +20,6 @@ The project also uses `cppcheck` to check for common mistakes and errors in C co
 It checks for any undefined behavior and dangerous code constructs in an attempt to ensure we aren't introducing bugs into the LibreSplit codebase.
 
 You can run it with `meson test -C build -v` to show the output of the code formatter and analysis tools.
-
-Opening a PR
-------------
-
-- If you're thinking about implementing a big feature or undertaking some major refactoring of the project, you should discuss it first through issues or discussions;
-- If you're fixing an open issue, remember to refer to such issue either in the PR description or in the commit message that fixes the issue properly;
-- Try to describe what your Pull Request is about, what it does and the rationale behind it, where appropriate.
 
 Generating the developer documentation
 --------------------------------------

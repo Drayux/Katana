@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-extern ProcessMap* maps_cache;
+extern ProcessMap * maps_cache;
 extern size_t maps_cache_size;
 
 /**
@@ -19,8 +19,8 @@ extern size_t maps_cache_size;
  * - nibble `A?`      => value=0xA0, mask=0xF0
  */
 typedef struct SigByte {
-    uint8_t value; /*!< Expected bits for this signature byte */
-    uint8_t mask; /*!< Bit mask selecting which bits are compared */
+	uint8_t value; /*!< Expected bits for this signature byte */
+	uint8_t mask;  /*!< Bit mask selecting which bits are compared */
 } SigByte;
 
 /**
@@ -32,14 +32,14 @@ typedef struct SigByte {
  * - an optional second exact-byte check for early rejection
  */
 typedef struct SigMatcher {
-    const SigByte* signature; /*!< Parsed signature bytes */
-    size_t signature_len; /*!< Number of bytes in signature */
-    bool has_anchor; /*!< Whether an exact-byte anchor exists */
-    size_t anchor_pos; /*!< Index of the anchor byte in signature */
-    uint8_t anchor_byte; /*!< Exact byte value used as anchor */
-    bool has_check; /*!< Whether a second exact-byte check exists */
-    size_t check_pos; /*!< Index of the secondary check byte */
-    uint8_t check_byte; /*!< Exact byte value used for secondary check */
+	SigByte const * signature; /*!< Parsed signature bytes */
+	size_t signature_len;	   /*!< Number of bytes in signature */
+	bool has_anchor;		   /*!< Whether an exact-byte anchor exists */
+	size_t anchor_pos;		   /*!< Index of the anchor byte in signature */
+	uint8_t anchor_byte;	   /*!< Exact byte value used as anchor */
+	bool has_check;			   /*!< Whether a second exact-byte check exists */
+	size_t check_pos;		   /*!< Index of the secondary check byte */
+	uint8_t check_byte;		   /*!< Exact byte value used for secondary check */
 } SigMatcher;
 
-int perform_sig_scan(lua_State* L);
+int perform_sig_scan(lua_State * L);

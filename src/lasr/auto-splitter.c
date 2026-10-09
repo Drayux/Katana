@@ -23,12 +23,16 @@
 #include <unistd.h>
 
 char auto_splitter_file[PATH_MAX]; /*!< The loaded auto splitter file path */
-int refresh_rate = 60; /*!< The Auto Splitter's refresh rate applied */
+int refresh_rate = 60;		/*!< The Auto Splitter's refresh rate applied */
 bool use_game_time = false; /*!< Enables IGT */
-atomic_bool update_game_time = false; /*!< True if the auto splitter is requesting the game time to be updated */
-atomic_llong game_time_value = 0; /*!< The in-game time value, in milliseconds */
-lasr_global* shared_globals = NULL;
-atomic_int lasr_event_requests = 0; /*!< Keeps tabs of which events we should react to */
+atomic_bool update_game_time =
+	false; /*!< True if the auto splitter is requesting the game time to be
+			  updated */
+atomic_llong game_time_value =
+	0; /*!< The in-game time value, in milliseconds */
+lasr_global * shared_globals = NULL;
+atomic_int lasr_event_requests =
+	0; /*!< Keeps tabs of which events we should react to */
 
 /**
  * Defines the behaviour of the map cache.
@@ -40,41 +44,40 @@ int maps_cache_cycles = 1;
  * Same as `maps_cache_cycles` but this one represents the current value
  * that changes on each cycle rather than the reference from the script
  */
-int maps_cache_cycles_value = 1; /*!< The number of cycles the cache is active for */
+int maps_cache_cycles_value =
+	1; /*!< The number of cycles the cache is active for */
 
-atomic_bool auto_splitter_enabled = true; /*!< Defines if the auto splitter is enabled */
-atomic_bool auto_splitter_running = false; /*!< Defines if the auto splitter is running */
-atomic_bool call_start = false; /*!< True if the auto splitter is requesting for a run to start */
-atomic_bool call_split = false; /*!< True if the auto splitter is requesting to split */
+atomic_bool auto_splitter_enabled =
+	true; /*!< Defines if the auto splitter is enabled */
+atomic_bool auto_splitter_running =
+	false; /*!< Defines if the auto splitter is running */
+atomic_bool call_start =
+	false; /*!< True if the auto splitter is requesting for a run to start */
+atomic_bool call_split =
+	false; /*!< True if the auto splitter is requesting to split */
 atomic_bool toggle_loading = false;
-atomic_bool call_reset = false; /*!< True if the auto splitter is requesting a run reset */
-atomic_bool run_using_game_time_call; /*!< True if startup has run and a new value for using game time has been set by the auto splitter */
-atomic_bool run_using_game_time; /*!< True if the auto splitter is requesting to use game time, false for real time */
-atomic_bool run_started = false; /*!< Wheter a run was started or not, same as timer->started but accessible from the auto splitter thread */
-atomic_bool run_running = false; /*!< Wheter we are running or not, same as timer->running but accessible from the auto splitter thread */
+atomic_bool call_reset =
+	false; /*!< True if the auto splitter is requesting a run reset */
+atomic_bool run_using_game_time_call; /*!< True if startup has run and a new
+										 value for using game time has been set
+										 by the auto splitter */
+atomic_bool run_using_game_time; /*!< True if the auto splitter is requesting to
+									use game time, false for real time */
+atomic_bool run_started =
+	false; /*!< Wheter a run was started or not, same as timer->started but
+			  accessible from the auto splitter thread */
+atomic_bool run_running =
+	false; /*!< Wheter we are running or not, same as timer->running but
+			  accessible from the auto splitter thread */
 bool prev_is_loading; /*!< The previous frame "is_loading" state */
 
 /**
  * Disable possibly dangerous functions in LASR.
  */
-static const char* disabled_functions[] = {
-    "collectgarbage",
-    "dofile",
-    "getmetatable",
-    "setmetatable",
-    "getfenv",
-    "setfenv",
-    "load",
-    "loadfile",
-    "loadstring",
-    "rawequal",
-    "rawget",
-    "rawset",
-    "module",
-    "require",
-    "newproxy",
-    NULL
-};
+static char const * disabled_functions[] = {"collectgarbage", "dofile",
+	"getmetatable", "setmetatable", "getfenv", "setfenv", "load", "loadfile",
+	"loadstring", "rawequal", "rawget", "rawset", "module", "require",
+	"newproxy", NULL};
 
 /**
  * @brief Initializes all auto_splitter values to their defaults
@@ -82,23 +85,23 @@ static const char* disabled_functions[] = {
  */
 void init_auto_splitter(void)
 {
-    // don't init auto_splitter_enabled, or auto_splitter_running here
-    atomic_store(&call_start, false);
-    atomic_store(&call_split, false);
-    atomic_store(&call_reset, false);
-    atomic_store(&toggle_loading, false);
-    atomic_store(&run_using_game_time, false);
-    atomic_store(&run_using_game_time_call, false);
-    atomic_store(&lasr_event_requests, 0);
-    atomic_store(&game_time_value, 0);
-    atomic_store(&update_game_time, false);
-    use_game_time = false;
-    prev_is_loading = false;
+	// don't init auto_splitter_enabled, or auto_splitter_running here
+	atomic_store(&call_start, false);
+	atomic_store(&call_split, false);
+	atomic_store(&call_reset, false);
+	atomic_store(&toggle_loading, false);
+	atomic_store(&run_using_game_time, false);
+	atomic_store(&run_using_game_time_call, false);
+	atomic_store(&lasr_event_requests, 0);
+	atomic_store(&game_time_value, 0);
+	atomic_store(&update_game_time, false);
+	use_game_time = false;
+	prev_is_loading = false;
 
-    // lasr initial values
-    refresh_rate = 60;
-    maps_cache_cycles = 1;
-    maps_cache_cycles_value = 1;
+	// lasr initial values
+	refresh_rate = 60;
+	maps_cache_cycles = 1;
+	maps_cache_cycles_value = 1;
 }
 
 /**
@@ -108,55 +111,37 @@ void init_auto_splitter(void)
  */
 static int process_exists(void)
 {
-    int result = kill(process.pid, 0);
-    return result == 0;
+	int result = kill(process.pid, 0);
+	return result == 0;
 }
 
 /**
  * Lua libraries to enable in LASR
  */
-static const luaL_Reg lj_lib_load[] = {
-    { "", luaopen_base },
-    { LUA_STRLIBNAME, luaopen_string },
-    { LUA_MATHLIBNAME, luaopen_math },
-    { LUA_BITLIBNAME, luaopen_bit },
-    { LUA_JITLIBNAME, luaopen_jit },
-    { NULL, NULL }
-};
+static luaL_Reg const lj_lib_load[] = {{"", luaopen_base},
+	{LUA_STRLIBNAME, luaopen_string}, {LUA_MATHLIBNAME, luaopen_math},
+	{LUA_BITLIBNAME, luaopen_bit}, {LUA_JITLIBNAME, luaopen_jit}, {NULL, NULL}};
 
 /**
  * Additional functions for the Lua Auto Split Runtime
  *
  * Must be NULL-terminated.
  */
-static const lasr_function default_luac_functions[] = {
-    { "process", find_process_id },
-    { "cmdline", find_cmdline_id },
-    { "getBaseAddress", getBaseAddress },
-    { "readAddress", readAddress },
-    { "sizeOf", size_of },
-    { "sig_scan", perform_sig_scan },
-    { "getPID", getPID },
-    { "getModuleSize", getModuleSize },
-    { "shallow_copy_tbl", shallow_copy_tbl },
-    { "print_tbl", print_tbl },
-    { "b_and", b_and },
-    { "b_or", b_or },
-    { "b_xor", b_xor },
-    { "b_not", b_not },
-    { "b_lshift", b_lshift },
-    { "b_rshift", b_rshift },
-    { "getMaps", getMaps },
-    { "str2ida", str2ida },
-    { "md5sum", md5sum },
-    { NULL, NULL }
-};
+static lasr_function const default_luac_functions[] = {
+	{"process", find_process_id}, {"cmdline", find_cmdline_id},
+	{"getBaseAddress", getBaseAddress}, {"readAddress", readAddress},
+	{"sizeOf", size_of}, {"sig_scan", perform_sig_scan}, {"getPID", getPID},
+	{"getModuleSize", getModuleSize}, {"shallow_copy_tbl", shallow_copy_tbl},
+	{"print_tbl", print_tbl}, {"b_and", b_and}, {"b_or", b_or},
+	{"b_xor", b_xor}, {"b_not", b_not}, {"b_lshift", b_lshift},
+	{"b_rshift", b_rshift}, {"getMaps", getMaps}, {"str2ida", str2ida},
+	{"md5sum", md5sum}, {NULL, NULL}};
 
 ExternalLASRFunctionRegistry external_lasr_functions = {
-    .size = 2,
-    .count = 0,
-    .functions = NULL,
-    .enabled = false,
+	.size = 2,
+	.count = 0,
+	.functions = NULL,
+	.enabled = false,
 };
 
 /**
@@ -164,12 +149,14 @@ ExternalLASRFunctionRegistry external_lasr_functions = {
  */
 void unregister_luac_functions(void)
 {
-    for (int i = 0; external_lasr_functions.functions[i].function_name != NULL; i++) {
-        LOG_DEBUGF("Unregistering Lua C function %s", external_lasr_functions.functions[i].function_name);
-        free(external_lasr_functions.functions[i].function_name);
-    }
-    // After freeing memory, we free the array itself.
-    free(external_lasr_functions.functions);
+	for (int i = 0; external_lasr_functions.functions[i].function_name != NULL;
+		i++) {
+		LOG_DEBUGF("Unregistering Lua C function %s",
+			external_lasr_functions.functions[i].function_name);
+		free(external_lasr_functions.functions[i].function_name);
+	}
+	// After freeing memory, we free the array itself.
+	free(external_lasr_functions.functions);
 }
 
 /**
@@ -177,12 +164,12 @@ void unregister_luac_functions(void)
  *
  * @param L The lua Stack
  */
-void push_default_lasr_functions(lua_State* L)
+void push_default_lasr_functions(lua_State * L)
 {
-    for (int i = 0; default_luac_functions[i].function_name != NULL; i++) {
-        lua_pushcfunction(L, default_luac_functions[i].function_ptr);
-        lua_setglobal(L, default_luac_functions[i].function_name);
-    }
+	for (int i = 0; default_luac_functions[i].function_name != NULL; i++) {
+		lua_pushcfunction(L, default_luac_functions[i].function_ptr);
+		lua_setglobal(L, default_luac_functions[i].function_name);
+	}
 }
 
 /**
@@ -190,16 +177,18 @@ void push_default_lasr_functions(lua_State* L)
  *
  * @param L The lua Stack
  */
-void push_external_lasr_functions(lua_State* L)
+void push_external_lasr_functions(lua_State * L)
 {
-    if (!external_lasr_functions.enabled || external_lasr_functions.count == 0) {
-        LOG_INFO("External LASR Functions registry not enabled or no functions to register. Skipping");
-        return;
-    }
-    for (int i = 0; i < external_lasr_functions.count; i++) {
-        lua_pushcfunction(L, external_lasr_functions.functions[i].function_ptr);
-        lua_setglobal(L, external_lasr_functions.functions[i].function_name);
-    }
+	if (!external_lasr_functions.enabled
+		|| external_lasr_functions.count == 0) {
+		LOG_INFO("External LASR Functions registry not enabled or no functions "
+				 "to register. Skipping");
+		return;
+	}
+	for (int i = 0; i < external_lasr_functions.count; i++) {
+		lua_pushcfunction(L, external_lasr_functions.functions[i].function_ptr);
+		lua_setglobal(L, external_lasr_functions.functions[i].function_name);
+	}
 }
 
 /**
@@ -208,14 +197,14 @@ void push_external_lasr_functions(lua_State* L)
  *
  * @param L The lua Stack
  */
-LUALIB_API void luaL_openlibs(lua_State* L)
+LUALIB_API void luaL_openlibs(lua_State * L)
 {
-    const luaL_Reg* lib;
-    for (lib = lj_lib_load; lib->func; lib++) {
-        lua_pushcfunction(L, lib->func);
-        lua_pushstring(L, lib->name);
-        lua_call(L, 1, 0);
-    }
+	luaL_Reg const * lib;
+	for (lib = lj_lib_load; lib->func; lib++) {
+		lua_pushcfunction(L, lib->func);
+		lua_pushstring(L, lib->name);
+		lua_call(L, 1, 0);
+	}
 }
 
 /**
@@ -224,12 +213,12 @@ LUALIB_API void luaL_openlibs(lua_State* L)
  * @param L The Lua Stack
  * @param functions An array of strings, defining the functions to disable.
  */
-void disable_functions(lua_State* L, const char** functions)
+void disable_functions(lua_State * L, char const ** functions)
 {
-    for (int i = 0; functions[i] != NULL; i++) {
-        lua_pushnil(L);
-        lua_setglobal(L, functions[i]);
-    }
+	for (int i = 0; functions[i] != NULL; i++) {
+		lua_pushnil(L);
+		lua_setglobal(L, functions[i]);
+	}
 }
 
 /**
@@ -251,57 +240,64 @@ void disable_functions(lua_State* L, const char** functions)
  * @return Pushes a single string containing a formatted stacktrace.
  * @copyright MIT license; borrowed from the LuaJIT interpreter.
  */
-static int traceback(lua_State* L)
+static int traceback(lua_State * L)
 {
-    if (!lua_isstring(L, 1)) { /* Non-string error object? Try metamethod. */
-        if (lua_isnoneornil(L, 1) || !luaL_callmeta(L, 1, "__tostring") || !lua_isstring(L, -1))
-            return 1; /* Return non-string error object. */
-        lua_remove(L, 1); /* Replace object by result of __tostring metamethod. */
-    }
-    luaL_traceback(L, L, lua_tostring(L, 1), 1);
-    return 1;
+	if (!lua_isstring(L, 1)) { /* Non-string error object? Try metamethod. */
+		if (lua_isnoneornil(L, 1) || !luaL_callmeta(L, 1, "__tostring")
+			|| !lua_isstring(L, -1))
+			return 1; /* Return non-string error object. */
+		lua_remove(
+			L, 1); /* Replace object by result of __tostring metamethod. */
+	}
+	luaL_traceback(L, L, lua_tostring(L, 1), 1);
+	return 1;
 }
 
 /**
- * @brief Modify Lua stacktrace to contain a readable name for the top-level function.
+ * @brief Modify Lua stacktrace to contain a readable name for the top-level
+ * function.
  *
- * When calling global Lua functions from C, `luaL_traceback()` loses track of the function name
- * because it is not associated with any bytecode slot. This results in tracebacks that end in
- * `in function </path/to/script.lua:line>` rather than `in function 'update'`. This procedure
- * substitutes that part for an explicit function name, replacing the top of the stack with the
- * modified string.
+ * When calling global Lua functions from C, `luaL_traceback()` loses track of
+ * the function name because it is not associated with any bytecode slot. This
+ * results in tracebacks that end in `in function </path/to/script.lua:line>`
+ * rather than `in function 'update'`. This procedure substitutes that part for
+ * an explicit function name, replacing the top of the stack with the modified
+ * string.
  *
- * @param L Expects a single error string to be at the top of the stack, such as is produced by `luaL_traceback()`.
+ * @param L Expects a single error string to be at the top of the stack, such as
+ * is produced by `luaL_traceback()`.
  * @param func The name of the function called from C code.
  */
-static void pcall_fix_traceback(lua_State* L, const char* func)
+static void pcall_fix_traceback(lua_State * L, char const * func)
 {
-    if (!lua_isstring(L, -1)) {
-        return;
-    }
+	if (!lua_isstring(L, -1)) {
+		return;
+	}
 
-    const char* trace = lua_tostring(L, -1);
-    const char* last_line = strrchr(trace, '\n');
-    if (last_line == NULL) {
-        LOG_WARN("lua traceback: invalid trace, traceback should have at least one new line");
-        return;
-    }
+	char const * trace = lua_tostring(L, -1);
+	char const * last_line = strrchr(trace, '\n');
+	if (last_line == NULL) {
+		LOG_WARN("lua traceback: invalid trace, traceback should have at least "
+				 "one new line");
+		return;
+	}
 
-    // "\t/path/to/script.lua:line: in function </path/to/script.lua:line>"
-    if (strlen(last_line) <= strlen(auto_splitter_file) + 1) {
-        // the trace should include the path and therefore be bigger.
-        return;
-    }
+	// "\t/path/to/script.lua:line: in function </path/to/script.lua:line>"
+	if (strlen(last_line) <= strlen(auto_splitter_file) + 1) {
+		// the trace should include the path and therefore be bigger.
+		return;
+	}
 
-    const char* path = strchr(last_line + 1 + strlen(auto_splitter_file), '<'); // auto splitter path may contain a `<` character
-    if (path == NULL) {
-        return;
-    }
+	char const * path = strchr(last_line + 1 + strlen(auto_splitter_file),
+		'<'); // auto splitter path may contain a `<` character
+	if (path == NULL) {
+		return;
+	}
 
-    lua_pushlstring(L, trace, path - trace);
-    lua_pushfstring(L, "'%s'", func);
-    lua_concat(L, 2);
-    lua_remove(L, -2); // remove original stacktrace string
+	lua_pushlstring(L, trace, path - trace);
+	lua_pushfstring(L, "'%s'", func);
+	lua_concat(L, 2);
+	lua_remove(L, -2); // remove original stacktrace string
 }
 
 /**
@@ -313,206 +309,221 @@ static void pcall_fix_traceback(lua_State* L, const char* func)
  *
  * @param head Reference to the first tracked export in a linked list.
  */
-static void update_shared_globals(lua_State* L, lasr_global* head)
+static void update_shared_globals(lua_State * L, lasr_global * head)
 {
-    double number_value;
-    char const* str_value;
-    size_t lstring_len;
-    int container_state;
-    int container_held;
+	double number_value;
+	char const * str_value;
+	size_t lstring_len;
+	int container_state;
+	int container_held;
 
-    /* Track parent for dynamic cleanup */
-    lasr_global* prev = NULL;
+	/* Track parent for dynamic cleanup */
+	lasr_global * prev = NULL;
 
-    while (head) {
-        container_held = atomic_load(&head->held);
-        if (!container_held) {
-            /* Unregister the global if the autosplitter is the only thing
-             * holding onto it (nothing to receive values so it's garbage.) */
-            if (!prev) {
-                shared_globals = head->next;
-                lasr_global_release(head);
-                head = shared_globals;
-            } else {
-                prev->next = head->next;
-                lasr_global_release(head);
-                head = prev->next;
-            }
-            continue;
-        }
+	while (head) {
+		container_held = atomic_load(&head->held);
+		if (!container_held) {
+			/* Unregister the global if the autosplitter is the only thing
+			 * holding onto it (nothing to receive values so it's garbage.) */
+			if (!prev) {
+				shared_globals = head->next;
+				lasr_global_release(head);
+				head = shared_globals;
+			}
+			else {
+				prev->next = head->next;
+				lasr_global_release(head);
+				head = prev->next;
+			}
+			continue;
+		}
 
-        container_state = atomic_load(&head->state);
-        switch (container_state) {
-            case LASR_STATE_OWNED:
-            case LASR_STATE_NEEDED:
-                goto next_global;
-        }
+		container_state = atomic_load(&head->state);
+		switch (container_state) {
+			case LASR_STATE_OWNED:
+			case LASR_STATE_NEEDED:
+				goto next_global;
+		}
 
-        lua_getglobal(L, head->key); /* push var to stack */
-        lstring_len = 0;
+		lua_getglobal(L, head->key); /* push var to stack */
+		lstring_len = 0;
 
-        switch (lua_type(L, -1)) { /* retrieve data type (of var at top of stack) */
-            case LUA_TBOOLEAN:
-            case LUA_TNUMBER:
-                number_value = lua_tonumber(L, -1);
-                export_atomic_global(head, number_value, LASR_TYPE_ATOMIC);
-                break;
+		switch (
+			lua_type(L, -1)) { /* retrieve data type (of var at top of stack) */
+			case LUA_TBOOLEAN:
+			case LUA_TNUMBER:
+				number_value = lua_tonumber(L, -1);
+				export_atomic_global(head, number_value, LASR_TYPE_ATOMIC);
+				break;
 
-            case LUA_TSTRING:
-                str_value = lua_tolstring(L, -1, &lstring_len);
-                export_dynamic_global(head, str_value, lstring_len);
-                break;
+			case LUA_TSTRING:
+				str_value = lua_tolstring(L, -1, &lstring_len);
+				export_dynamic_global(head, str_value, lstring_len);
+				break;
 
-            default:
-                /* Treat other types as nil */
-                if (atomic_load(&head->value.type) != LASR_TYPE_NIL) {
-                    /* Only prints whenever the value changes */
-                    LOG_DEBUGF("Unsupported type for lua export: `%s`", head->key);
-                }
-            case LUA_TNIL:
-                number_value = 0.0f; // Not used if NIL type, suppress compiler warning
-                export_atomic_global(head, number_value, LASR_TYPE_NIL);
-                break;
-        }
+			default:
+				/* Treat other types as nil */
+				if (atomic_load(&head->value.type) != LASR_TYPE_NIL) {
+					/* Only prints whenever the value changes */
+					LOG_DEBUGF(
+						"Unsupported type for lua export: `%s`", head->key);
+				}
+			case LUA_TNIL:
+				number_value =
+					0.0f; // Not used if NIL type, suppress compiler warning
+				export_atomic_global(head, number_value, LASR_TYPE_NIL);
+				break;
+		}
 
-        lua_pop(L, 1);
-    next_global:
-        prev = head;
-        head = head->next;
-    }
+		lua_pop(L, 1);
+	next_global:
+		prev = head;
+		head = head->next;
+	}
 }
 
 /**
-    Generic function to call lua functions
-    Signatures are something like `disb>s`
-    1. d = double
-    2. i = int
-    3. s = string
-    4. b = boolean
-    5. > = return separator
+	Generic function to call lua functions
+	Signatures are something like `disb>s`
+	1. d = double
+	2. i = int
+	3. s = string
+	4. b = boolean
+	5. > = return separator
 
-    Example: `call_va(L, "functionName", "dd>d", x, y, &z);`
-    Calls "functionName" with two doubles as parameters (x and y), returning a double in z
+	Example: `call_va(L, "functionName", "dd>d", x, y, &z);`
+	Calls "functionName" with two doubles as parameters (x and y), returning a
+   double in z
 */
-bool call_va(lua_State* L, const char* func, const char* sig, ...)
+bool call_va(lua_State * L, char const * func, char const * sig, ...)
 {
-    va_list vl;
-    int narg, nres; /* number of arguments and results */
-    int status, base;
+	va_list vl;
+	int narg, nres; /* number of arguments and results */
+	int status, base;
 
-    va_start(vl, sig);
-    lua_pushcfunction(L, traceback);
-    base = lua_gettop(L);
-    lua_getglobal(L, func); /* get function */
+	va_start(vl, sig);
+	lua_pushcfunction(L, traceback);
+	base = lua_gettop(L);
+	lua_getglobal(L, func); /* get function */
 
-    /* push arguments */
-    narg = 0;
-    while (*sig) { /* push arguments */
-        switch (*sig++) {
-            case 'd': /* double argument */
-                lua_pushnumber(L, va_arg(vl, double));
-                break;
+	/* push arguments */
+	narg = 0;
+	while (*sig) { /* push arguments */
+		switch (*sig++) {
+			case 'd': /* double argument */
+				lua_pushnumber(L, va_arg(vl, double));
+				break;
 
-            case 'i': /* int argument */
-                lua_pushnumber(L, va_arg(vl, int));
-                break;
+			case 'i': /* int argument */
+				lua_pushnumber(L, va_arg(vl, int));
+				break;
 
-            case 's': /* string argument */
-                lua_pushstring(L, va_arg(vl, char*));
-                break;
+			case 's': /* string argument */
+				lua_pushstring(L, va_arg(vl, char *));
+				break;
 
-            case 'b':
-                lua_pushboolean(L, va_arg(vl, int));
-                break;
+			case 'b':
+				lua_pushboolean(L, va_arg(vl, int));
+				break;
 
-            case '>':
-                break;
+			case '>':
+				break;
 
-            default:
-                printf("invalid option (%c)\n", *(sig - 1));
-                va_end(vl);
-                return false;
-        }
-        if (*(sig - 1) == '>')
-            break;
-        narg++;
-        luaL_checkstack(L, 1, "too many arguments");
-    }
+			default:
+				printf("invalid option (%c)\n", *(sig - 1));
+				va_end(vl);
+				return false;
+		}
+		if (*(sig - 1) == '>')
+			break;
+		narg++;
+		luaL_checkstack(L, 1, "too many arguments");
+	}
 
-    /* do the call */
-    nres = strlen(sig); /* number of expected results */
-    status = lua_pcall(L, narg, nres, base);
-    lua_remove(L, base); /* remove traceback function */
-    if (status != LUA_OK) {
-        /* see the implementation of `report()` and `docall()` in the LuaJIT source */
-        if (!lua_isnil(L, -1)) {
-            const char* err;
-            pcall_fix_traceback(L, func);
-            err = lua_tostring(L, -1);
-            if (err == NULL)
-                err = "(error object is not a string)";
-            fprintf(stderr, "%s\n", err);
-        }
-        lua_pop(L, 1);
-        va_end(vl);
-        return false;
-    }
+	/* do the call */
+	nres = strlen(sig); /* number of expected results */
+	status = lua_pcall(L, narg, nres, base);
+	lua_remove(L, base); /* remove traceback function */
+	if (status != LUA_OK) {
+		/* see the implementation of `report()` and `docall()` in the LuaJIT
+		 * source */
+		if (!lua_isnil(L, -1)) {
+			char const * err;
+			pcall_fix_traceback(L, func);
+			err = lua_tostring(L, -1);
+			if (err == NULL)
+				err = "(error object is not a string)";
+			fprintf(stderr, "%s\n", err);
+		}
+		lua_pop(L, 1);
+		va_end(vl);
+		return false;
+	}
 
-    /* retrieve results */
-    nres = -nres; /* stack index of first result */
-    /* check if there's a return value */
-    if (!lua_isnil(L, nres)) {
-        while (*sig) { /* get results */
-            switch (*sig++) {
-                case 'd': /* double result */
-                    if (!lua_isnumber(L, nres)) {
-                        printf("function '%s' wrong result type, expected double\n", func);
-                        va_end(vl);
-                        return false;
-                    }
-                    *va_arg(vl, double*) = lua_tonumber(L, nres);
-                    break;
+	/* retrieve results */
+	nres = -nres; /* stack index of first result */
+	/* check if there's a return value */
+	if (!lua_isnil(L, nres)) {
+		while (*sig) { /* get results */
+			switch (*sig++) {
+				case 'd': /* double result */
+					if (!lua_isnumber(L, nres)) {
+						printf("function '%s' wrong result type, expected "
+							   "double\n",
+							func);
+						va_end(vl);
+						return false;
+					}
+					*va_arg(vl, double *) = lua_tonumber(L, nres);
+					break;
 
-                case 'i': /* int result */
-                    if (!lua_isnumber(L, nres)) {
-                        printf("function '%s' wrong result type, expected int\n", func);
-                        va_end(vl);
-                        return false;
-                    }
-                    *va_arg(vl, int*) = lua_tointeger(L, nres);
-                    break;
+				case 'i': /* int result */
+					if (!lua_isnumber(L, nres)) {
+						printf(
+							"function '%s' wrong result type, expected int\n",
+							func);
+						va_end(vl);
+						return false;
+					}
+					*va_arg(vl, int *) = lua_tointeger(L, nres);
+					break;
 
-                case 's': /* string result */
-                    if (!lua_isstring(L, nres)) {
-                        printf("function '%s' wrong result type, expected string\n", func);
-                        va_end(vl);
-                        return false;
-                    }
-                    *va_arg(vl, const char**) = lua_tostring(L, nres);
-                    break;
+				case 's': /* string result */
+					if (!lua_isstring(L, nres)) {
+						printf("function '%s' wrong result type, expected "
+							   "string\n",
+							func);
+						va_end(vl);
+						return false;
+					}
+					*va_arg(vl, char const **) = lua_tostring(L, nres);
+					break;
 
-                case 'b':
-                    if (!lua_isboolean(L, nres)) {
-                        printf("function '%s' wrong result type, expected boolean\n", func);
-                        va_end(vl);
-                        return false;
-                    }
-                    *va_arg(vl, bool*) = lua_toboolean(L, nres);
-                    break;
+				case 'b':
+					if (!lua_isboolean(L, nres)) {
+						printf("function '%s' wrong result type, expected "
+							   "boolean\n",
+							func);
+						va_end(vl);
+						return false;
+					}
+					*va_arg(vl, bool *) = lua_toboolean(L, nres);
+					break;
 
-                default:
-                    printf("invalid option (%c)\n", *(sig - 1));
-                    va_end(vl);
-                    return false;
-            }
-            nres++;
-        }
-    } else {
-        va_end(vl);
-        return false;
-    }
-    va_end(vl);
-    return true;
+				default:
+					printf("invalid option (%c)\n", *(sig - 1));
+					va_end(vl);
+					return false;
+			}
+			nres++;
+		}
+	}
+	else {
+		va_end(vl);
+		return false;
+	}
+	va_end(vl);
+	return true;
 }
 
 /**
@@ -523,37 +534,39 @@ bool call_va(lua_State* L, const char* func, const char* sig, ...)
  *
  * @param L The Lua State
  */
-void startup(lua_State* L)
+void startup(lua_State * L)
 {
-    call_va(L, "startup", "");
+	call_va(L, "startup", "");
 
-    if (!atomic_load(&auto_splitter_enabled)) {
-        return;
-    }
+	if (!atomic_load(&auto_splitter_enabled)) {
+		return;
+	}
 
-    lua_getglobal(L, "refreshRate");
-    if (lua_isnumber(L, -1)) {
-        refresh_rate = lua_tointeger(L, -1);
-    }
-    lua_pop(L, 1); // Remove 'refreshRate' from the stack
+	lua_getglobal(L, "refreshRate");
+	if (lua_isnumber(L, -1)) {
+		refresh_rate = lua_tointeger(L, -1);
+	}
+	lua_pop(L, 1); // Remove 'refreshRate' from the stack
 
-    lua_getglobal(L, "mapsCacheCycles");
-    if (lua_isnumber(L, -1)) {
-        maps_cache_cycles = lua_tointeger(L, -1);
-        maps_cache_cycles_value = maps_cache_cycles;
-    }
-    lua_pop(L, 1); // Remove 'mapsCacheCycles' from the stack
+	lua_getglobal(L, "mapsCacheCycles");
+	if (lua_isnumber(L, -1)) {
+		maps_cache_cycles = lua_tointeger(L, -1);
+		maps_cache_cycles_value = maps_cache_cycles;
+	}
+	lua_pop(L, 1); // Remove 'mapsCacheCycles' from the stack
 
-    lua_getglobal(L, "useGameTime");
-    if (lua_isboolean(L, -1)) {
-        use_game_time = lua_toboolean(L, -1);
-        atomic_store(&run_using_game_time, use_game_time);
-        atomic_store(&run_using_game_time_call, true);
-    } else {
-        atomic_store(&run_using_game_time, false); // Default to real time if not specified
-        atomic_store(&run_using_game_time_call, true);
-    }
-    lua_pop(L, 1); // Remove 'useGameTime' from the stack
+	lua_getglobal(L, "useGameTime");
+	if (lua_isboolean(L, -1)) {
+		use_game_time = lua_toboolean(L, -1);
+		atomic_store(&run_using_game_time, use_game_time);
+		atomic_store(&run_using_game_time_call, true);
+	}
+	else {
+		atomic_store(&run_using_game_time,
+			false); // Default to real time if not specified
+		atomic_store(&run_using_game_time_call, true);
+	}
+	lua_pop(L, 1); // Remove 'useGameTime' from the stack
 }
 
 /**
@@ -563,10 +576,7 @@ void startup(lua_State* L)
  *
  * @param L The Lua State
  */
-void state(lua_State* L)
-{
-    call_va(L, "state", "");
-}
+void state(lua_State * L) { call_va(L, "state", ""); }
 
 /**
  * The update() LASR function.
@@ -575,10 +585,7 @@ void state(lua_State* L)
  *
  * @param L The Lua State
  */
-void update(lua_State* L)
-{
-    call_va(L, "update", "");
-}
+void update(lua_State * L) { call_va(L, "update", ""); }
 
 /**
  * The start() LASR function.
@@ -588,16 +595,16 @@ void update(lua_State* L)
  *
  * @param L The Lua State
  */
-void start(lua_State* L)
+void start(lua_State * L)
 {
-    bool ret;
-    if (call_va(L, "start", ">b", &ret)) {
-        if (ret) {
-            atomic_store(&run_started, true);
-            atomic_store(&call_start, true);
-        }
-    }
-    lua_pop(L, 1); // Remove the return value from the stack
+	bool ret;
+	if (call_va(L, "start", ">b", &ret)) {
+		if (ret) {
+			atomic_store(&run_started, true);
+			atomic_store(&call_start, true);
+		}
+	}
+	lua_pop(L, 1); // Remove the return value from the stack
 }
 
 /**
@@ -607,13 +614,13 @@ void start(lua_State* L)
  *
  * @param L The Lua State
  */
-void split(lua_State* L)
+void split(lua_State * L)
 {
-    bool ret;
-    if (call_va(L, "split", ">b", &ret)) {
-        atomic_store(&call_split, ret);
-    }
-    lua_pop(L, 1); // Remove the return value from the stack
+	bool ret;
+	if (call_va(L, "split", ">b", &ret)) {
+		atomic_store(&call_split, ret);
+	}
+	lua_pop(L, 1); // Remove the return value from the stack
 }
 
 /**
@@ -624,16 +631,16 @@ void split(lua_State* L)
  *
  * @param L The Lua State
  */
-void is_loading(lua_State* L)
+void is_loading(lua_State * L)
 {
-    bool loading;
-    if (call_va(L, "isLoading", ">b", &loading)) {
-        if (loading != prev_is_loading) {
-            atomic_store(&toggle_loading, true);
-            prev_is_loading = !prev_is_loading;
-        }
-    }
-    lua_pop(L, 1); // Remove the return value from the stack
+	bool loading;
+	if (call_va(L, "isLoading", ">b", &loading)) {
+		if (loading != prev_is_loading) {
+			atomic_store(&toggle_loading, true);
+			prev_is_loading = !prev_is_loading;
+		}
+	}
+	lua_pop(L, 1); // Remove the return value from the stack
 }
 
 /**
@@ -644,19 +651,19 @@ void is_loading(lua_State* L)
  *
  * @param L The Lua State
  */
-void reset(lua_State* L)
+void reset(lua_State * L)
 {
-    bool shouldReset;
-    if (call_va(L, "reset", ">b", &shouldReset)) {
-        if (shouldReset) {
+	bool shouldReset;
+	if (call_va(L, "reset", ">b", &shouldReset)) {
+		if (shouldReset) {
 
-            atomic_store(&call_reset, true);
-            // Assume these happen instantly to avoid any desync
-            atomic_store(&run_started, false);
-            atomic_store(&run_running, false);
-        }
-    }
-    lua_pop(L, 1); // Remove the return value from the stack
+			atomic_store(&call_reset, true);
+			// Assume these happen instantly to avoid any desync
+			atomic_store(&run_started, false);
+			atomic_store(&run_running, false);
+		}
+	}
+	lua_pop(L, 1); // Remove the return value from the stack
 }
 
 /**
@@ -667,15 +674,16 @@ void reset(lua_State* L)
  *
  * @param L The Lua State
  */
-void gameTime(lua_State* L)
+void gameTime(lua_State * L)
 {
-    int gameTime;
-    if (call_va(L, "gameTime", ">i", &gameTime)) {
-        // Convert gameTime from milliseconds to the expected time format and update the timer
-        atomic_store(&game_time_value, (long long)gameTime * 1000);
-        atomic_store(&update_game_time, true);
-    }
-    lua_pop(L, 1); // Remove the return value from the stack
+	int gameTime;
+	if (call_va(L, "gameTime", ">i", &gameTime)) {
+		// Convert gameTime from milliseconds to the expected time format and
+		// update the timer
+		atomic_store(&game_time_value, (long long) gameTime * 1000);
+		atomic_store(&update_game_time, true);
+	}
+	lua_pop(L, 1); // Remove the return value from the stack
 }
 
 /**
@@ -684,14 +692,15 @@ void gameTime(lua_State* L)
  * @param L The lua state
  * @param name The function name to look for
  *
- * @returns True if the function is defined in the auto splitter, false otherwise
+ * @returns True if the function is defined in the auto splitter, false
+ * otherwise
  */
-static bool has_lua_function(lua_State* L, const char* name)
+static bool has_lua_function(lua_State * L, char const * name)
 {
-    lua_getglobal(L, name);
-    bool exists = lua_isfunction(L, -1);
-    lua_pop(L, 1); // Remove function from the stack
-    return exists;
+	lua_getglobal(L, name);
+	bool exists = lua_isfunction(L, -1);
+	lua_pop(L, 1); // Remove function from the stack
+	return exists;
 }
 
 /**
@@ -699,203 +708,211 @@ static bool has_lua_function(lua_State* L, const char* name)
  */
 void run_auto_splitter(void)
 {
-    lua_State* L = luaL_newstate();
-    luaL_openlibs(L);
-    disable_functions(L, disabled_functions);
-    push_default_lasr_functions(L);
-    push_external_lasr_functions(L);
-    lasr_settings_register(L);
+	lua_State * L = luaL_newstate();
+	luaL_openlibs(L);
+	disable_functions(L, disabled_functions);
+	push_default_lasr_functions(L);
+	push_external_lasr_functions(L);
+	lasr_settings_register(L);
 
-    char current_file[PATH_MAX];
-    strcpy(current_file, auto_splitter_file);
+	char current_file[PATH_MAX];
+	strcpy(current_file, auto_splitter_file);
 
-    // Load the Lua file
-    lua_pushcfunction(L, traceback);
-    int base = lua_gettop(L);
-    if (luaL_loadfile(L, auto_splitter_file) != LUA_OK) {
-        // Error loading the file
-        const char* error_msg = lua_tostring(L, -1);
-        fprintf(stderr, "Lua syntax error: %s\n", error_msg);
-        lua_pop(L, 1); // Remove the error message from the stack
-        lua_close(L);
-        maps_clearCache();
-        lasr_settings_clear();
-        atomic_store(&auto_splitter_enabled, false);
-        return;
-    }
+	// Load the Lua file
+	lua_pushcfunction(L, traceback);
+	int base = lua_gettop(L);
+	if (luaL_loadfile(L, auto_splitter_file) != LUA_OK) {
+		// Error loading the file
+		char const * error_msg = lua_tostring(L, -1);
+		fprintf(stderr, "Lua syntax error: %s\n", error_msg);
+		lua_pop(L, 1); // Remove the error message from the stack
+		lua_close(L);
+		maps_clearCache();
+		lasr_settings_clear();
+		atomic_store(&auto_splitter_enabled, false);
+		return;
+	}
 
-    // Execute the Lua file
-    if (lua_pcall(L, 0, LUA_MULTRET, base) != LUA_OK || lasr_settings_load(L) != LUA_OK) {
-        // Error executing the file
-        if (!lua_isnil(L, -1)) {
-            const char* err = lua_tostring(L, -1);
-            if (err == NULL)
-                err = "(error object is not a string)";
-            fprintf(stderr, "%s\n", err);
-        }
-        lua_pop(L, 1);
-        lua_close(L);
-        maps_clearCache();
-        lasr_settings_clear();
-        atomic_store(&auto_splitter_enabled, false);
-        return;
-    }
+	// Execute the Lua file
+	if (lua_pcall(L, 0, LUA_MULTRET, base) != LUA_OK
+		|| lasr_settings_load(L) != LUA_OK) {
+		// Error executing the file
+		if (!lua_isnil(L, -1)) {
+			char const * err = lua_tostring(L, -1);
+			if (err == NULL)
+				err = "(error object is not a string)";
+			fprintf(stderr, "%s\n", err);
+		}
+		lua_pop(L, 1);
+		lua_close(L);
+		maps_clearCache();
+		lasr_settings_clear();
+		atomic_store(&auto_splitter_enabled, false);
+		return;
+	}
 
-    lua_remove(L, base); /* remove traceback function */
+	lua_remove(L, base); /* remove traceback function */
 
-    bool state_exists = has_lua_function(L, "state");
-    bool start_exists = has_lua_function(L, "start");
-    bool split_exists = has_lua_function(L, "split");
-    bool is_loading_exists = has_lua_function(L, "isLoading");
-    bool startup_exists = has_lua_function(L, "startup");
-    bool reset_exists = has_lua_function(L, "reset");
-    bool update_exists = has_lua_function(L, "update");
-    bool gameTime_exists = has_lua_function(L, "gameTime");
-    // Reactive Functions
-    bool onStart_exists = has_lua_function(L, "onStart");
-    bool onSplit_exists = has_lua_function(L, "onSplit");
-    bool onStop_exists = has_lua_function(L, "onStop");
-    bool onReset_exists = has_lua_function(L, "onReset");
-    bool onCancel_exists = has_lua_function(L, "onCancel");
-    bool onSkip_exists = has_lua_function(L, "onSkip");
-    bool onUnsplit_exists = has_lua_function(L, "onUnsplit");
-    bool onPause_exists = has_lua_function(L, "onPause");
-    bool onUnpause_exists = has_lua_function(L, "onUnpause");
+	bool state_exists = has_lua_function(L, "state");
+	bool start_exists = has_lua_function(L, "start");
+	bool split_exists = has_lua_function(L, "split");
+	bool is_loading_exists = has_lua_function(L, "isLoading");
+	bool startup_exists = has_lua_function(L, "startup");
+	bool reset_exists = has_lua_function(L, "reset");
+	bool update_exists = has_lua_function(L, "update");
+	bool gameTime_exists = has_lua_function(L, "gameTime");
+	// Reactive Functions
+	bool onStart_exists = has_lua_function(L, "onStart");
+	bool onSplit_exists = has_lua_function(L, "onSplit");
+	bool onStop_exists = has_lua_function(L, "onStop");
+	bool onReset_exists = has_lua_function(L, "onReset");
+	bool onCancel_exists = has_lua_function(L, "onCancel");
+	bool onSkip_exists = has_lua_function(L, "onSkip");
+	bool onUnsplit_exists = has_lua_function(L, "onUnsplit");
+	bool onPause_exists = has_lua_function(L, "onPause");
+	bool onUnpause_exists = has_lua_function(L, "onUnpause");
 
-    if (startup_exists) {
-        startup(L);
-    }
+	if (startup_exists) {
+		startup(L);
+	}
 
-    printf("Refresh rate: %d\n", refresh_rate);
-    int rate = 1000000 / refresh_rate;
+	printf("Refresh rate: %d\n", refresh_rate);
+	int rate = 1000000 / refresh_rate;
 
-    while (1) {
-        struct timespec clock_start;
-        clock_gettime(CLOCK_MONOTONIC, &clock_start);
+	while (1) {
+		struct timespec clock_start;
+		clock_gettime(CLOCK_MONOTONIC, &clock_start);
 
-        if (!atomic_load(&auto_splitter_enabled) || strcmp(current_file, auto_splitter_file) != 0 || !process_exists() || process.pid == 0) {
-            // NOTE: [Penaz] [2026-03-14] Here we can decide what to do when a game detaches.
-            // ^ maybe we should divide it between "process_exists()" (auto splitter active but not connected)
-            // ^ and the other cases (autosplitter disabled, process not found, changed auto splitter).
-            break;
-        }
+		if (!atomic_load(&auto_splitter_enabled)
+			|| strcmp(current_file, auto_splitter_file) != 0
+			|| !process_exists() || process.pid == 0) {
+			// NOTE: [Penaz] [2026-03-14] Here we can decide what to do when a
+			// game detaches. ^ maybe we should divide it between
+			// "process_exists()" (auto splitter active but not connected) ^ and
+			// the other cases (autosplitter disabled, process not found,
+			// changed auto splitter).
+			break;
+		}
 
-        if (state_exists) {
-            state(L);
-        }
+		if (state_exists) {
+			state(L);
+		}
 
-        if (update_exists) {
-            update(L);
-        }
+		if (update_exists) {
+			update(L);
+		}
 
-        if (gameTime_exists && use_game_time && atomic_load(&run_started) && atomic_load(&run_running)) {
-            gameTime(L);
-        }
+		if (gameTime_exists && use_game_time && atomic_load(&run_started)
+			&& atomic_load(&run_running)) {
+			gameTime(L);
+		}
 
-        if (start_exists && !atomic_load(&run_started) && !atomic_load(&run_running)) {
-            start(L);
-        }
+		if (start_exists && !atomic_load(&run_started)
+			&& !atomic_load(&run_running)) {
+			start(L);
+		}
 
-        if (split_exists && atomic_load(&run_started)) {
-            split(L);
-        }
+		if (split_exists && atomic_load(&run_started)) {
+			split(L);
+		}
 
-        if (is_loading_exists) {
-            is_loading(L);
-        }
+		if (is_loading_exists) {
+			is_loading(L);
+		}
 
-        if (reset_exists && atomic_load(&run_running)) {
-            reset(L);
-        }
+		if (reset_exists && atomic_load(&run_running)) {
+			reset(L);
+		}
 
-        if (onStart_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_START)) {
-                call_va(L, "onStart", "");
-            }
-        }
+		if (onStart_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_START)) {
+				call_va(L, "onStart", "");
+			}
+		}
 
-        if (onSplit_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_SPLIT)) {
-                call_va(L, "onSplit", "");
-            }
-        }
+		if (onSplit_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_SPLIT)) {
+				call_va(L, "onSplit", "");
+			}
+		}
 
-        if (onStop_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_STOP)) {
-                call_va(L, "onStop", "");
-            }
-        }
+		if (onStop_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_STOP)) {
+				call_va(L, "onStop", "");
+			}
+		}
 
-        if (onReset_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_RESET)) {
-                call_va(L, "onReset", "");
-            }
-        }
+		if (onReset_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_RESET)) {
+				call_va(L, "onReset", "");
+			}
+		}
 
-        if (onCancel_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_CANCEL)) {
-                call_va(L, "onCancel", "");
-            }
-        }
+		if (onCancel_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_CANCEL)) {
+				call_va(L, "onCancel", "");
+			}
+		}
 
-        if (onSkip_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_SKIP)) {
-                call_va(L, "onSkip", "");
-            }
-        }
+		if (onSkip_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_SKIP)) {
+				call_va(L, "onSkip", "");
+			}
+		}
 
-        if (onUnsplit_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_UNSPLIT)) {
-                call_va(L, "onUnsplit", "");
-            }
-        }
+		if (onUnsplit_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_UNSPLIT)) {
+				call_va(L, "onUnsplit", "");
+			}
+		}
 
-        if (onPause_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_PAUSE)) {
-                call_va(L, "onPause", "");
-            }
-        }
+		if (onPause_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_PAUSE)) {
+				call_va(L, "onPause", "");
+			}
+		}
 
-        if (onUnpause_exists) {
-            if ((atomic_load(&lasr_event_requests) & TIMER_EVT_UNPAUSE)) {
-                call_va(L, "onUnpause", "");
-            }
-        }
+		if (onUnpause_exists) {
+			if ((atomic_load(&lasr_event_requests) & TIMER_EVT_UNPAUSE)) {
+				call_va(L, "onUnpause", "");
+			}
+		}
 
-        atomic_store(&lasr_event_requests, 0);
+		atomic_store(&lasr_event_requests, 0);
 
-        /* Export any tracked globals that have changed */
-        update_shared_globals(L, shared_globals);
+		/* Export any tracked globals that have changed */
+		update_shared_globals(L, shared_globals);
 
-        // Clear the memory maps cache if needed
-        maps_cache_cycles_value--;
-        if (maps_cache_cycles_value < 1) {
-            maps_clearCache();
-            maps_cache_cycles_value = maps_cache_cycles;
-            // printf("Cleared maps cache\n");
-        }
+		// Clear the memory maps cache if needed
+		maps_cache_cycles_value--;
+		if (maps_cache_cycles_value < 1) {
+			maps_clearCache();
+			maps_cache_cycles_value = maps_cache_cycles;
+			// printf("Cleared maps cache\n");
+		}
 
-        struct timespec clock_end;
-        clock_gettime(CLOCK_MONOTONIC, &clock_end);
-        long long duration = (clock_end.tv_sec - clock_start.tv_sec) * 1000000 + (clock_end.tv_nsec - clock_start.tv_nsec) / 1000;
-        // printf("duration: %llu\n", duration);
-        if (duration < rate) {
-            usleep(rate - duration);
-        }
-    }
+		struct timespec clock_end;
+		clock_gettime(CLOCK_MONOTONIC, &clock_end);
+		long long duration = (clock_end.tv_sec - clock_start.tv_sec) * 1000000
+			+ (clock_end.tv_nsec - clock_start.tv_nsec) / 1000;
+		// printf("duration: %llu\n", duration);
+		if (duration < rate) {
+			usleep(rate - duration);
+		}
+	}
 
-    lua_close(L);
+	lua_close(L);
 
-    maps_clearCache();
-    lasr_settings_clear();
+	maps_clearCache();
+	lasr_settings_clear();
 
-    /* Drop all shared global containers when autosplitter stops */
-    lasr_global* globals_ptr = shared_globals;
-    while (globals_ptr) {
-        shared_globals = globals_ptr->next;
-        lasr_global_release(globals_ptr);
-        globals_ptr = shared_globals;
-    }
+	/* Drop all shared global containers when autosplitter stops */
+	lasr_global * globals_ptr = shared_globals;
+	while (globals_ptr) {
+		shared_globals = globals_ptr->next;
+		lasr_global_release(globals_ptr);
+		globals_ptr = shared_globals;
+	}
 }
 
 /**
@@ -906,8 +923,8 @@ void run_auto_splitter(void)
  */
 void stop_auto_splitter(void)
 {
-    atomic_store(&auto_splitter_enabled, false);
-    while (atomic_load(&auto_splitter_running)) {
-        // wait, this will be very fast so its ok to just spin
-    }
+	atomic_store(&auto_splitter_enabled, false);
+	while (atomic_load(&auto_splitter_running)) {
+		// wait, this will be very fast so its ok to just spin
+	}
 }

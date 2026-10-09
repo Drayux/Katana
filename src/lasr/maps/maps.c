@@ -14,14 +14,15 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-ProcessMap* maps_cache = NULL; // Array of cached maps
-size_t maps_cache_size = 0; // Number of cached maps
+ProcessMap * maps_cache = NULL; // Array of cached maps
+size_t maps_cache_size = 0;		// Number of cached maps
 
 // Use blocks to build the maps cache incrementally
 // This allows the cache to be built without knowing the total size in advance
-// Also makes it easier to manage memory so we dont overshoot in alloc size and grows predictably
-static MapsBlock* head = NULL; // Head of blocks
-static MapsBlock* current = NULL; // Current block being filled
+// Also makes it easier to manage memory so we dont overshoot in alloc size and
+// grows predictably
+static MapsBlock * head = NULL;	   // Head of blocks
+static MapsBlock * current = NULL; // Current block being filled
 
 /**
  * Append a ProcessMap entry to the internal block list.
@@ -29,29 +30,30 @@ static MapsBlock* current = NULL; // Current block being filled
  */
 static void append_entry(ProcessMap e)
 {
-    if (!current || current->used == MAPS_CACHE_BLOCK_SIZE) {
-        MapsBlock* new_block = malloc(sizeof(MapsBlock));
-        if (!new_block) {
-            perror("Failed to allocate memory for maps block");
-            exit(EXIT_FAILURE);
-        }
+	if (!current || current->used == MAPS_CACHE_BLOCK_SIZE) {
+		MapsBlock * new_block = malloc(sizeof(MapsBlock));
+		if (!new_block) {
+			perror("Failed to allocate memory for maps block");
+			exit(EXIT_FAILURE);
+		}
 
-        new_block->used = 0;
-        new_block->next = NULL;
+		new_block->used = 0;
+		new_block->next = NULL;
 
-        if (!head) {
-            head = new_block;
-        } else {
-            if (current) {
-                // Guard to avoid null-dereferencing
-                current->next = new_block;
-            }
-        }
+		if (!head) {
+			head = new_block;
+		}
+		else {
+			if (current) {
+				// Guard to avoid null-dereferencing
+				current->next = new_block;
+			}
+		}
 
-        current = new_block;
-    }
+		current = new_block;
+	}
 
-    current->entries[current->used++] = e;
+	current->entries[current->used++] = e;
 }
 /**
  * Flatten the internal linked list of MapsBlock into a contiguous array.
@@ -61,24 +63,24 @@ static void append_entry(ProcessMap e)
  *
  * Returns: pointer to malloc'd array of ProcessMap entries.
  */
-static ProcessMap* maps_flatten(size_t* out_count)
+static ProcessMap * maps_flatten(size_t * out_count)
 {
-    size_t total = 0;
-    for (MapsBlock* b = head; b; b = b->next)
-        total += b->used;
+	size_t total = 0;
+	for (MapsBlock * b = head; b; b = b->next)
+		total += b->used;
 
-    ProcessMap* arr = malloc(total * sizeof(ProcessMap));
-    if (!arr)
-        abort();
+	ProcessMap * arr = malloc(total * sizeof(ProcessMap));
+	if (!arr)
+		abort();
 
-    size_t idx = 0;
-    for (MapsBlock* b = head; b; b = b->next) {
-        memcpy(&arr[idx], b->entries, b->used * sizeof(ProcessMap));
-        idx += b->used;
-    }
+	size_t idx = 0;
+	for (MapsBlock * b = head; b; b = b->next) {
+		memcpy(&arr[idx], b->entries, b->used * sizeof(ProcessMap));
+		idx += b->used;
+	}
 
-    *out_count = total;
-    return arr;
+	*out_count = total;
+	return arr;
 }
 
 /**
@@ -92,20 +94,20 @@ static ProcessMap* maps_flatten(size_t* out_count)
  */
 void maps_clearCache(void)
 {
-    MapsBlock* b = head;
-    while (b) {
-        MapsBlock* next = b->next;
-        free(b);
-        b = next;
-    }
-    head = NULL;
-    current = NULL;
+	MapsBlock * b = head;
+	while (b) {
+		MapsBlock * next = b->next;
+		free(b);
+		b = next;
+	}
+	head = NULL;
+	current = NULL;
 
-    if (maps_cache) {
-        free(maps_cache);
-        maps_cache = NULL;
-        maps_cache_size = 0;
-    }
+	if (maps_cache) {
+		free(maps_cache);
+		maps_cache = NULL;
+		maps_cache_size = 0;
+	}
 }
 
 #ifdef IOCTL_MAPS
@@ -119,77 +121,80 @@ void maps_clearCache(void)
  */
 static bool maps_ioctlSupported(void)
 {
-    const char* path = "/proc/self/maps";
-    int f = open(path, O_RDONLY);
-    if (f < 0) {
-        return false;
-    }
+	char const * path = "/proc/self/maps";
+	int f = open(path, O_RDONLY);
+	if (f < 0) {
+		return false;
+	}
 
-    struct procmap_query q = { 0 };
-    q.size = sizeof(q);
-    q.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
-    q.query_addr = 0;
+	struct procmap_query q = {0};
+	q.size = sizeof(q);
+	q.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
+	q.query_addr = 0;
 
-    // https://man7.org/linux/man-pages/man2/ioctl.2.html
-    // musl uses int instead of uint like glibc
-    int ret = ioctl(f,
+	// https://man7.org/linux/man-pages/man2/ioctl.2.html
+	// musl uses int instead of uint like glibc
+	int ret = ioctl(f,
 #ifndef __GLIBC__
-        (int)
+		(int)
 #endif
-            PROCMAP_QUERY,
-        &q);
-    close(f);
-    return ret >= 0;
+			PROCMAP_QUERY,
+		&q);
+	close(f);
+	return ret >= 0;
 }
 
 /**
  * Populate the maps cache by querying the target process maps.
  *
  * uses `ioctl(PROCMAP_QUERY)` in a loop to collect all VMA information.
- * Entries are collected into internal blocks and then flattened into `maps_cache`.
+ * Entries are collected into internal blocks and then flattened into
+ * `maps_cache`.
  *
  * @return Number of maps collected
  */
 static size_t maps_getAll_ioctl(void)
 {
-    char path[22]; // 22 is the maximum length the path can be (strlen("/proc/4294967296/maps"))
-    snprintf(path, sizeof(path), "/proc/%d/maps", process.pid);
-    int f = open(path, O_RDONLY);
-    if (f >= 0) {
-        struct procmap_query q = { 0 };
-        char map_name[PATH_MAX + 1] = { 0 };
-        q.size = sizeof(q);
-        q.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
-        q.query_addr = 0;
-        maps_clearCache();
-        for (;;) {
-            q.vma_name_addr = (uintptr_t)map_name;
-            q.vma_name_size = sizeof(map_name);
-            int ret = ioctl(f,
+	char path[22]; // 22 is the maximum length the path can be
+				   // (strlen("/proc/4294967296/maps"))
+	snprintf(path, sizeof(path), "/proc/%d/maps", process.pid);
+	int f = open(path, O_RDONLY);
+	if (f >= 0) {
+		struct procmap_query q = {0};
+		char map_name[PATH_MAX + 1] = {0};
+		q.size = sizeof(q);
+		q.query_flags = PROCMAP_QUERY_COVERING_OR_NEXT_VMA;
+		q.query_addr = 0;
+		maps_clearCache();
+		for (;;) {
+			q.vma_name_addr = (uintptr_t) map_name;
+			q.vma_name_size = sizeof(map_name);
+			int ret = ioctl(f,
 #ifndef __GLIBC__
-                (int)
+				(int)
 #endif
-                    PROCMAP_QUERY,
-                &q);
-            if (ret < 0) {
-                break;
-            }
-            ProcessMap map = {
-                .start = q.vma_start,
-                .end = q.vma_end,
-                .size = q.vma_end - q.vma_start,
-            };
-            strncpy(map.name, q.vma_name_addr ? map_name : "", sizeof(map.name));
-            map.name[sizeof(map.name) - 1] = '\0';
-            map_name[0] = '\0';
-            append_entry(map);
-            // Advance past this mapping
-            q.query_addr = q.vma_end;
-        }
-        close(f);
-        maps_cache = maps_flatten(&maps_cache_size);
-    }
-    return maps_cache_size;
+					PROCMAP_QUERY,
+				&q);
+			if (ret < 0) {
+				break;
+			}
+			ProcessMap map = {
+				.start = q.vma_start,
+				.end = q.vma_end,
+				.size = q.vma_end - q.vma_start,
+			};
+			strncpy(
+				map.name, q.vma_name_addr ? map_name : "", sizeof(map.name));
+			map.name[sizeof(map.name) - 1] = '\0';
+			map_name[0] = '\0';
+			append_entry(map);
+			// Advance past this mapping
+			q.query_addr = q.vma_end;
+		}
+		close(f);
+		maps_cache = maps_flatten(&maps_cache_size);
+	}
+	return maps_cache_size;
 }
 
 #endif
@@ -201,28 +206,28 @@ static size_t maps_getAll_ioctl(void)
  *
  * @return true on successful parse, false otherwise.
  */
-static bool maps_parseMapsLine(const char* line, ProcessMap* map)
+static bool maps_parseMapsLine(char const * line, ProcessMap * map)
 {
-    uint64_t size;
-    char mode[8];
-    unsigned long offset, node_id;
-    unsigned int major_id, minor_id;
+	uint64_t size;
+	char mode[8];
+	unsigned long offset, node_id;
+	unsigned int major_id, minor_id;
 
-    // Thank you kernel source code
-    int sscanf_res = sscanf(line, "%lx-%lx %7s %lx %x:%x %lu %" STR(PATH_MAX) "[^\n]", &map->start,
-        &map->end, mode, &offset, &major_id,
-        &minor_id, &node_id, map->name);
-    // Here we only allow the map name to be empty, anything else should return show a
-    // parsing failure
-    if (sscanf_res < 7) {
-        LOG_DEBUGF("Cannot fully parse the maps line: %s", line);
-        return false;
-    }
+	// Thank you kernel source code
+	int sscanf_res = sscanf(line,
+		"%lx-%lx %7s %lx %x:%x %lu %" STR(PATH_MAX) "[^\n]", &map->start,
+		&map->end, mode, &offset, &major_id, &minor_id, &node_id, map->name);
+	// Here we only allow the map name to be empty, anything else should return
+	// show a parsing failure
+	if (sscanf_res < 7) {
+		LOG_DEBUGF("Cannot fully parse the maps line: %s", line);
+		return false;
+	}
 
-    // Calculate the map size
-    size = map->end - map->start;
-    map->size = size;
-    return true;
+	// Calculate the map size
+	size = map->end - map->start;
+	map->size = size;
+	return true;
 }
 
 /**
@@ -232,36 +237,39 @@ static bool maps_parseMapsLine(const char* line, ProcessMap* map)
  */
 static size_t maps_getAll_legacy(void)
 {
-    char path[22]; // 22 is the maximum length the path can be (strlen("/proc/4294967296/maps"))
+	char path[22]; // 22 is the maximum length the path can be
+				   // (strlen("/proc/4294967296/maps"))
 
-    if (snprintf(path, sizeof(path), "/proc/%d/maps", process.pid) < 0) {
-        LOG_ERR("Failed to create maps path");
-        return 0;
-    }
+	if (snprintf(path, sizeof(path), "/proc/%d/maps", process.pid) < 0) {
+		LOG_ERR("Failed to create maps path");
+		return 0;
+	}
 
-    FILE* f = fopen(path, "r");
+	FILE * f = fopen(path, "r");
 
-    if (!f) {
-        LOG_ERR("Failed to open maps file");
-        return 0;
-    }
+	if (!f) {
+		LOG_ERR("Failed to open maps file");
+		return 0;
+	}
 
-    char current_line[PATH_MAX + 100];
-    maps_clearCache();
-    // XXX: [Penaz] [2026-09-10] Is it possible for /proc/pid/maps to generate a line longer
-    // ^ than 4096 (+ 100 chars of "padding") characters? If we ever run into buffer size issues
-    // ^ it might be worth looking into using getline()
-    while (fgets(current_line, sizeof(current_line), f) != NULL) {
-        ProcessMap map = { 0 };
-        if (maps_parseMapsLine(current_line, &map)) {
-            append_entry(map);
-        } else {
-            printf("Failed to parse maps line: %s\n", current_line);
-        }
-    }
-    fclose(f);
-    maps_cache = maps_flatten(&maps_cache_size);
-    return maps_cache_size;
+	char current_line[PATH_MAX + 100];
+	maps_clearCache();
+	// XXX: [Penaz] [2026-09-10] Is it possible for /proc/pid/maps to generate a
+	// line longer ^ than 4096 (+ 100 chars of "padding") characters? If we ever
+	// run into buffer size issues ^ it might be worth looking into using
+	// getline()
+	while (fgets(current_line, sizeof(current_line), f) != NULL) {
+		ProcessMap map = {0};
+		if (maps_parseMapsLine(current_line, &map)) {
+			append_entry(map);
+		}
+		else {
+			printf("Failed to parse maps line: %s\n", current_line);
+		}
+	}
+	fclose(f);
+	maps_cache = maps_flatten(&maps_cache_size);
+	return maps_cache_size;
 }
 
 #ifdef IOCTL_MAPS
@@ -279,14 +287,17 @@ static size_t (*maps_getAll_var)(void) = maps_getAll_legacy;
  */
 static size_t maps_getAll_init(void)
 {
-    if (!getenv("LIBRESPLIT_DISABLE_IOCTL_MAPS") && maps_ioctlSupported()) {
-        maps_getAll_var = maps_getAll_ioctl;
-        printf("PROCMAP_QUERY is supported, using ioctl method for maps retrieval.\n");
-    } else {
-        maps_getAll_var = maps_getAll_legacy;
-        printf("PROCMAP_QUERY is not supported, using legacy method for maps retrieval.\n");
-    }
-    return (*maps_getAll_var)();
+	if (!getenv("LIBRESPLIT_DISABLE_IOCTL_MAPS") && maps_ioctlSupported()) {
+		maps_getAll_var = maps_getAll_ioctl;
+		printf("PROCMAP_QUERY is supported, using ioctl method for maps "
+			   "retrieval.\n");
+	}
+	else {
+		maps_getAll_var = maps_getAll_legacy;
+		printf("PROCMAP_QUERY is not supported, using legacy method for maps "
+			   "retrieval.\n");
+	}
+	return (*maps_getAll_var)();
 }
 #endif
 
@@ -295,10 +306,7 @@ static size_t maps_getAll_init(void)
  *
  * @return Number of maps collected
  */
-size_t maps_getAll(void)
-{
-    return (*maps_getAll_var)();
-}
+size_t maps_getAll(void) { return (*maps_getAll_var)(); }
 
 /**
  * Find a map by substring match on its name.
@@ -312,32 +320,32 @@ size_t maps_getAll(void)
  *
  * Returns: true if a matching map was found, false otherwise.
  */
-bool maps_findMapByName(const char* name, ProcessMap* out_map)
+bool maps_findMapByName(char const * name, ProcessMap * out_map)
 {
-    if (!name)
-        return false;
+	if (!name)
+		return false;
 
-    for (uint32_t i = 0; i < maps_cache_size; i++) {
-        const char* map_name = maps_cache[i].name;
-        if (strcasestr(map_name, name) != NULL) {
-            *out_map = maps_cache[i];
-            return true;
-        }
-    }
+	for (uint32_t i = 0; i < maps_cache_size; i++) {
+		char const * map_name = maps_cache[i].name;
+		if (strcasestr(map_name, name) != NULL) {
+			*out_map = maps_cache[i];
+			return true;
+		}
+	}
 
-    // We didnt find it, get
-    maps_getAll();
+	// We didnt find it, get
+	maps_getAll();
 
-    for (uint32_t i = 0; i < maps_cache_size; i++) {
-        const char* map_name = maps_cache[i].name;
-        if (strcasestr(map_name, name) != NULL) {
-            *out_map = maps_cache[i];
-            if (!maps_cache_cycles) { // Cache is disabled, clear after use
-                maps_clearCache();
-            }
-            return true;
-        }
-    }
+	for (uint32_t i = 0; i < maps_cache_size; i++) {
+		char const * map_name = maps_cache[i].name;
+		if (strcasestr(map_name, name) != NULL) {
+			*out_map = maps_cache[i];
+			if (!maps_cache_cycles) { // Cache is disabled, clear after use
+				maps_clearCache();
+			}
+			return true;
+		}
+	}
 
-    return false;
+	return false;
 }

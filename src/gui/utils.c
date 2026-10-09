@@ -6,9 +6,9 @@
  * @param widget The widget to add the class to
  * @param class The class to add
  */
-void add_class(GtkWidget* widget, const char* class)
+void add_class(GtkWidget * widget, char const * class)
 {
-    gtk_widget_add_css_class(widget, class);
+	gtk_widget_add_css_class(widget, class);
 }
 
 /**
@@ -17,7 +17,7 @@ void add_class(GtkWidget* widget, const char* class)
  * @param widget The widget to remove the class from
  * @param class The class to remove
  */
-void remove_class(GtkWidget* widget, const char* class)
+void remove_class(GtkWidget * widget, char const * class)
 {
-    gtk_widget_remove_css_class(widget, class);
+	gtk_widget_remove_css_class(widget, class);
 }

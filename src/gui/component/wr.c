@@ -8,10 +8,11 @@
  * @brief The component representing the saved World Record
  */
 typedef struct LSWr {
-    LSComponent base; /*!< The base struct that is extended */
-    GtkWidget* container; /*!< The container for the world record */
-    GtkWidget* world_record_label; /*!< The label showing the "World record" text */
-    GtkWidget* world_record; /*!< The label showing the world record time */
+	LSComponent base;	   /*!< The base struct that is extended */
+	GtkWidget * container; /*!< The container for the world record */
+	GtkWidget *
+		world_record_label;	  /*!< The label showing the "World record" text */
+	GtkWidget * world_record; /*!< The label showing the world record time */
 } LSWr;
 extern LSComponentOps ls_wr_operations;
 
@@ -20,33 +21,33 @@ extern LSComponentOps ls_wr_operations;
 /**
  * Constructor
  */
-LSComponent* ls_component_wr_new(json_t* config)
+LSComponent * ls_component_wr_new(json_t * config)
 {
-    LSWr* self;
+	LSWr * self;
 
-    self = malloc(sizeof(LSWr));
-    if (!self) {
-        return NULL;
-    }
-    self->base.ops = &ls_wr_operations;
+	self = malloc(sizeof(LSWr));
+	if (!self) {
+		return NULL;
+	}
+	self->base.ops = &ls_wr_operations;
 
-    self->container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    add_class(self->container, "footer"); /* hack */
-    add_class(self->container, "world-record-container");
+	self->container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	add_class(self->container, "footer"); /* hack */
+	add_class(self->container, "world-record-container");
 
-    self->world_record_label = gtk_label_new(WORLD_RECORD);
-    add_class(self->world_record_label, "world-record-label");
-    gtk_box_append(GTK_BOX(self->container), self->world_record_label);
-    gtk_widget_set_visible(self->world_record_label, FALSE);
+	self->world_record_label = gtk_label_new(WORLD_RECORD);
+	add_class(self->world_record_label, "world-record-label");
+	gtk_box_append(GTK_BOX(self->container), self->world_record_label);
+	gtk_widget_set_visible(self->world_record_label, FALSE);
 
-    self->world_record = gtk_label_new(NULL);
-    add_class(self->world_record, "world-record");
-    add_class(self->world_record, "time");
-    gtk_widget_set_halign(self->world_record, GTK_ALIGN_END);
-    gtk_box_append(GTK_BOX(self->container), self->world_record);
-    gtk_widget_set_visible(self->world_record, FALSE);
+	self->world_record = gtk_label_new(NULL);
+	add_class(self->world_record, "world-record");
+	add_class(self->world_record, "time");
+	gtk_widget_set_halign(self->world_record, GTK_ALIGN_END);
+	gtk_box_append(GTK_BOX(self->container), self->world_record);
+	gtk_widget_set_visible(self->world_record, FALSE);
 
-    return (LSComponent*)self;
+	return (LSComponent *) self;
 }
 
 /**
@@ -54,10 +55,7 @@ LSComponent* ls_component_wr_new(json_t* config)
  *
  * @param self The component to destroy
  */
-static void wr_delete(LSComponent* self)
-{
-    free(self);
-}
+static void wr_delete(LSComponent * self) { free(self); }
 
 /**
  * Returns the World Record GTK widget.
@@ -65,9 +63,9 @@ static void wr_delete(LSComponent* self)
  * @param self The World Record component itself.
  * @return The container as a GTK Widget.
  */
-static GtkWidget* wr_widget(LSComponent* self)
+static GtkWidget * wr_widget(LSComponent * self)
 {
-    return ((LSWr*)self)->container;
+	return ((LSWr *) self)->container;
 }
 
 /**
@@ -77,19 +75,20 @@ static GtkWidget* wr_widget(LSComponent* self)
  * @param game The game struct instance.
  * @param timer The timer instance.
  */
-static void wr_show_game(LSComponent* self_,
-    const ls_game* game, const ls_timer* timer)
+static void wr_show_game(
+	LSComponent * self_, ls_game const * game, ls_timer const * timer)
 {
-    LSWr* self = (LSWr*)self_;
-    gtk_widget_set_halign(self->world_record_label, GTK_ALIGN_START);
-    gtk_widget_set_hexpand(self->world_record_label, TRUE);
-    if (ls_time_get_by_method(game->world_record, game->comparison_method)) {
-        char str[256];
-        ls_time_string(str, ls_time_get_by_method(game->world_record, game->comparison_method));
-        gtk_label_set_text(GTK_LABEL(self->world_record), str);
-        gtk_widget_set_visible(self->world_record, TRUE);
-        gtk_widget_set_visible(self->world_record_label, TRUE);
-    }
+	LSWr * self = (LSWr *) self_;
+	gtk_widget_set_halign(self->world_record_label, GTK_ALIGN_START);
+	gtk_widget_set_hexpand(self->world_record_label, TRUE);
+	if (ls_time_get_by_method(game->world_record, game->comparison_method)) {
+		char str[256];
+		ls_time_string(str,
+			ls_time_get_by_method(game->world_record, game->comparison_method));
+		gtk_label_set_text(GTK_LABEL(self->world_record), str);
+		gtk_widget_set_visible(self->world_record, TRUE);
+		gtk_widget_set_visible(self->world_record_label, TRUE);
+	}
 }
 
 /**
@@ -97,11 +96,11 @@ static void wr_show_game(LSComponent* self_,
  *
  * @param self_ The best time component itself.
  */
-static void wr_clear_game(LSComponent* self_)
+static void wr_clear_game(LSComponent * self_)
 {
-    LSWr* self = (LSWr*)self_;
-    gtk_widget_set_visible(self->world_record_label, FALSE);
-    gtk_widget_set_visible(self->world_record, FALSE);
+	LSWr * self = (LSWr *) self_;
+	gtk_widget_set_visible(self->world_record_label, FALSE);
+	gtk_widget_set_visible(self->world_record, FALSE);
 }
 
 /**
@@ -111,28 +110,29 @@ static void wr_clear_game(LSComponent* self_)
  * @param game The game struct instance.
  * @param timer The timer instance.
  */
-static void wr_draw(LSComponent* self_, const ls_game* game,
-    const ls_timer* timer)
+static void wr_draw(
+	LSComponent * self_, ls_game const * game, ls_timer const * timer)
 {
-    LSWr* self = (LSWr*)self_;
-    char str[256];
-    long long wr_time = ls_time_get_by_method(game->world_record, game->comparison_method);
-    long long current_time = ls_time_get_by_method(timer->split_times[game->split_count - 1], game->comparison_method);
-    if (timer->curr_split == game->split_count && wr_time) {
-        if (current_time && current_time < wr_time) {
-            ls_time_string(str, current_time);
-        } else {
-            ls_time_string(str, wr_time);
-        }
+	LSWr * self = (LSWr *) self_;
+	char str[256];
+	long long wr_time =
+		ls_time_get_by_method(game->world_record, game->comparison_method);
+	long long current_time = ls_time_get_by_method(
+		timer->split_times[game->split_count - 1], game->comparison_method);
+	if (timer->curr_split == game->split_count && wr_time) {
+		if (current_time && current_time < wr_time) {
+			ls_time_string(str, current_time);
+		}
+		else {
+			ls_time_string(str, wr_time);
+		}
 
-        gtk_label_set_text(GTK_LABEL(self->world_record), str);
-    }
+		gtk_label_set_text(GTK_LABEL(self->world_record), str);
+	}
 }
 
-LSComponentOps ls_wr_operations = {
-    .delete = wr_delete,
-    .widget = wr_widget,
-    .show_game = wr_show_game,
-    .clear_game = wr_clear_game,
-    .draw = wr_draw
-};
+LSComponentOps ls_wr_operations = {.delete = wr_delete,
+	.widget = wr_widget,
+	.show_game = wr_show_game,
+	.clear_game = wr_clear_game,
+	.draw = wr_draw};

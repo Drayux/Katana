@@ -9,9 +9,9 @@
  *
  * @return A Keybind struct corresponding to the requested keybind.
  */
-Keybind parse_keybind(const gchar* accelerator)
+Keybind parse_keybind(gchar const * accelerator)
 {
-    Keybind kb;
-    gtk_accelerator_parse(accelerator, &kb.key, &kb.mods);
-    return kb;
+	Keybind kb;
+	gtk_accelerator_parse(accelerator, &kb.key, &kb.mods);
+	return kb;
 }

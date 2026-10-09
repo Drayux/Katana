@@ -8,8 +8,8 @@
  *
  * @return Always 1.
  */
-int getPID(lua_State* L)
+int getPID(lua_State * L)
 {
-    lua_pushinteger(L, process.pid);
-    return 1;
+	lua_pushinteger(L, process.pid);
+	return 1;
 }

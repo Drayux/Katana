@@ -1,22 +1,24 @@
-project(
-    'libresplit',
-    'c',
+project('katana', 'c',
     version: 'pre-release',
     default_options: ['c_std=gnu17'],
     meson_version: '>=1.1',
-)
+    default_options: [
+        'buildtype=debug',
+        'warning_level=1'
+    ])
+
+if get_option('buildtype') == 'release'
+	add_project_arguments('-Wpedantic', '-Werror', language: 'c')
+    add_project_arguments('-DLOG_LEVEL=1', language: 'c')
+else
+    add_project_arguments('-DDEBUG', language: 'c')
+    add_project_arguments('-DLOG_LEVEL=0', language: 'c')
+endif
 
 add_project_arguments('-DAPP_VERSION="@0@"'.format(meson.project_version()), language: 'c')
 add_project_arguments('-D_GNU_SOURCE=1 ', language: 'c')
 add_project_arguments('-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_16', language: 'c')
 add_project_arguments('-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_16', language: 'c')
-
-if get_option('buildtype') == 'debug'
-    add_project_arguments('-DDEBUG', language: 'c')
-    add_project_arguments('-DLOG_LEVEL=0', language: 'c')
-else
-    add_project_arguments('-DLOG_LEVEL=1', language: 'c')
-endif
 
 cc = meson.get_compiler('c')
 has_procmap_ioctl = cc.has_header_symbol('linux/fs.h', 'PROCMAP_QUERY')
@@ -26,17 +28,20 @@ if ioctl_maps.enabled()
 endif
 
 threads = dependency('threads')
-gtk = dependency('gtk4', version: '>= 4.16', include_type: 'system')
-gtk_x11 = dependency('gtk4-x11', version: '>= 4.16', include_type: 'system')
 luajit = dependency('luajit')
 x11 = dependency('x11')
-jansson = dependency('jansson')
 openssl = dependency('openssl')
+# TODO: These should become optional at some point
+gtk = dependency('gtk4', version: '>= 4.16', include_type: 'system')
+gtk_x11 = dependency('gtk4-x11', version: '>= 4.16', include_type: 'system')
+### (and this one might become a plugin dependency not main project)
+jansson = dependency('jansson')
+###
 
 public_api = include_directories('include')
 private_headers = include_directories('src')
 
-libresplit_sources = files(
+sources = files(
     'src/gui/actions.c',
     'src/gui/app_window.c',
     'src/gui/backends/x11.c',
@@ -108,33 +113,30 @@ libresplit_sources = files(
     'src/timer.c',
 )
 
-libresplit_ctl_sources = files(
+ctl_sources = files(
     'src/ctl.c',
     'src/shared.c',
 )
 
 gnome = import('gnome')
-libresplit_resources = gnome.compile_resources(
+resources = gnome.compile_resources(
     'libresplit-resources',
     'assets/libresplit.gresource.xml',
     source_dir: 'assets/resources',
-    c_name: 'libresplit',
+    c_name: 'katana',
 )
 
 shared_c_flags = [
     '-DPREFIX="' + get_option('prefix') + '"',
     '-DDATADIR="' + get_option('datadir') + '"',
-    # '-Werror',
-    '-Wall',
     '-Wbad-function-cast',
     '-Wsign-compare',
-    '-Wpedantic',
 ]
 
 executable(
-    'libresplit',
-    libresplit_sources,
-    libresplit_resources,
+    'katana',
+    sources,
+    resources,
     dependencies: [threads, gtk, gtk_x11, luajit, x11, jansson, openssl],
     c_args: shared_c_flags,
     install: true,
@@ -142,8 +144,8 @@ executable(
 )
 
 executable(
-    'libresplit-ctl',
-    libresplit_ctl_sources,
+    'katana-ctl',
+    ctl_sources,
     c_args: shared_c_flags,
     install: true,
     include_directories: [public_api, private_headers],
@@ -163,7 +165,7 @@ install_data(
     install_dir: get_option('prefix') / get_option('datadir') / 'doc' / meson.project_name(),
 )
 install_data(
-    'LICENSE',
+    'LICENSE.md',
     install_dir: get_option('prefix') / get_option('datadir') / 'licenses' / meson.project_name(),
 )
 
@@ -192,7 +194,7 @@ if clang_format.found()
         clang_format,
         args: [
             '--dry-run',
-            '--Werror', libresplit_sources,
+            '--Werror', sources,
         ],
         suite: 'format',
     )
@@ -202,7 +204,7 @@ if clang_format.found()
         clang_format,
         args: [
             '--dry-run',
-            '--Werror', libresplit_ctl_sources,
+            '--Werror', ctl_sources,
         ],
         suite: 'format',
     )
@@ -230,14 +232,14 @@ if cppcheck.found()
     test(
         'cppcheck-libresplit',
         cppcheck,
-        args: cppcheck_base_args + libresplit_sources,
+        args: cppcheck_base_args + sources,
         suite: 'lint',
     )
     # Check LibreSplitCTL
     test(
         'cppcheck-ctl',
         cppcheck,
-        args: cppcheck_base_args + libresplit_ctl_sources,
+        args: cppcheck_base_args + ctl_sources,
         suite: 'lint',
     )
 else

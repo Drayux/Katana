@@ -14,16 +14,17 @@ game_process process;
 /**
  * Restarts the auto splitter by disabling it and re-enabling it again
  *
- * @return true if the auto splitter was enabled before the restart, false otherwise
+ * @return true if the auto splitter was enabled before the restart, false
+ * otherwise
  */
 bool restart_auto_splitter(void)
 {
-    const bool was_asl_enabled = atomic_load(&auto_splitter_enabled);
-    if (was_asl_enabled) {
-        stop_auto_splitter();
-        atomic_store(&auto_splitter_enabled, true);
-    }
-    return was_asl_enabled;
+	bool const was_asl_enabled = atomic_load(&auto_splitter_enabled);
+	if (was_asl_enabled) {
+		stop_auto_splitter();
+		atomic_store(&auto_splitter_enabled, true);
+	}
+	return was_asl_enabled;
 }
 
 /**
@@ -37,44 +38,47 @@ bool restart_auto_splitter(void)
  * @param container A non-null reference to a 'lasr_global' container to be
  * tracked.
  */
-void register_shared_global(lasr_global* new)
+void register_shared_global(lasr_global * new)
 {
-    if (atomic_load(&auto_splitter_running)) {
-        /* Reject this call if the autosplitter is running (developer error if
-         * this happens.)
-         * The linked list is not atomic, so we are certain to spontaneously
-         * crash if this were ignored */
-        LOG_DEBUGF("Reject registration of export var `%s`", new ? new->key : "<none>");
-        return;
-    } else if (!new) {
-        /* Valid flow, nothing to do. */
-        return;
-    }
+	if (atomic_load(&auto_splitter_running)) {
+		/* Reject this call if the autosplitter is running (developer error if
+		 * this happens.)
+		 * The linked list is not atomic, so we are certain to spontaneously
+		 * crash if this were ignored */
+		LOG_DEBUGF("Reject registration of export var `%s`",
+			new ? new->key : "<none>");
+		return;
+	}
+	else if (!new) {
+		/* Valid flow, nothing to do. */
+		return;
+	}
 
-    atomic_store(&new->held, true);
-    new->next = shared_globals;
-    shared_globals = new;
+	atomic_store(&new->held, true);
+	new->next = shared_globals;
+	shared_globals = new;
 
-    LOG_DEBUGF("Register export var `%s`", new ? new->key : "<none>");
+	LOG_DEBUGF("Register export var `%s`", new ? new->key : "<none>");
 }
 
 /**
  * Gets the base address of a module.
  *
- * @param module The module name for which to find the base address of. If NULL, the main process is used.
+ * @param module The module name for which to find the base address of. If NULL,
+ * the main process is used.
  *
  * @return The base address of the chosen module.
  */
-uintptr_t find_base_address(const char* module)
+uintptr_t find_base_address(char const * module)
 {
-    const char* module_to_grep = module == 0 ? process.name : module;
+	char const * module_to_grep = module == 0 ? process.name : module;
 
-    ProcessMap map;
-    const bool found = maps_findMapByName(module_to_grep, &map);
-    if (found) {
-        return map.start;
-    }
-    return 0;
+	ProcessMap map;
+	bool const found = maps_findMapByName(module_to_grep, &map);
+	if (found) {
+		return map.start;
+	}
+	return 0;
 }
 
 /**
@@ -86,33 +90,35 @@ uintptr_t find_base_address(const char* module)
  */
 bool handle_memory_error(uint32_t err)
 {
-    static bool shownDialog = false;
-    if (err == 0)
-        return false;
-    switch (err) {
-        case EFAULT:
-            printf("[readAddress] EFAULT: Invalid memory space/address\n");
-            break;
-        case EINVAL:
-            printf("[readAddress] EINVAL: An error ocurred while reading memory\n");
-            break;
-        case ENOMEM:
-            printf("[readAddress] ENOMEM: Please get more memory\n");
-            break;
-        case EPERM:
-            printf("[readAddress] EPERM: Permission denied\n");
+	static bool shownDialog = false;
+	if (err == 0)
+		return false;
+	switch (err) {
+		case EFAULT:
+			printf("[readAddress] EFAULT: Invalid memory space/address\n");
+			break;
+		case EINVAL:
+			printf("[readAddress] EINVAL: An error ocurred while reading "
+				   "memory\n");
+			break;
+		case ENOMEM:
+			printf("[readAddress] ENOMEM: Please get more memory\n");
+			break;
+		case EPERM:
+			printf("[readAddress] EPERM: Permission denied\n");
 
-            if (!shownDialog) {
-                shownDialog = true;
-                g_idle_add(display_non_capable_mem_read_dialog, NULL);
-            }
+			if (!shownDialog) {
+				shownDialog = true;
+				g_idle_add(display_non_capable_mem_read_dialog, NULL);
+			}
 
-            break;
-        case ESRCH:
-            printf("[readAddress] ESRCH: No process with specified PID exists\n");
-            break;
-    }
-    return true;
+			break;
+		case ESRCH:
+			printf(
+				"[readAddress] ESRCH: No process with specified PID exists\n");
+			break;
+	}
+	return true;
 }
 
 /**
@@ -122,18 +128,18 @@ bool handle_memory_error(uint32_t err)
  * This is due to lua_tostring returning "null" for booleans and
  * other non-string types.
  */
-const char* value_to_c_string(lua_State* L, int index)
+char const * value_to_c_string(lua_State * L, int index)
 {
-    switch (lua_type(L, index)) {
-        case LUA_TSTRING:
-            return lua_tostring(L, index);
-        case LUA_TNUMBER:
-            return lua_tostring(L, index);
-        case LUA_TBOOLEAN:
-            return lua_toboolean(L, index) ? "true" : "false";
-        case LUA_TNIL:
-            return "nil";
-        default:
-            return "??";
-    }
+	switch (lua_type(L, index)) {
+		case LUA_TSTRING:
+			return lua_tostring(L, index);
+		case LUA_TNUMBER:
+			return lua_tostring(L, index);
+		case LUA_TBOOLEAN:
+			return lua_toboolean(L, index) ? "true" : "false";
+		case LUA_TNIL:
+			return "nil";
+		default:
+			return "??";
+	}
 }

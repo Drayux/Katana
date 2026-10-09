@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int size_of(lua_State* L);
+int size_of(lua_State * L);

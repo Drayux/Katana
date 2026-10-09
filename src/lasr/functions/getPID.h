@@ -2,4 +2,4 @@
 
 #include <lua.h>
 
-int getPID(lua_State* L);
+int getPID(lua_State * L);
