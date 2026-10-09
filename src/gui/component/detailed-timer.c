@@ -2,7 +2,7 @@
  *
  * Implementation of the "Detailed timer" component.
  */
-#include "components.h"
+#include "gui/component/components.h"
 
 #define MAX_PRECISION 6
 
