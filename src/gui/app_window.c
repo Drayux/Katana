@@ -1,25 +1,25 @@
-#include "app_window.h"
-#include "src/gui/actions.h"
-#include "src/gui/backends/x11.h"
-#include "src/gui/component/components.h"
-#include "src/gui/context_menu.h"
-#include "src/gui/dialogs.h"
-#include "src/gui/game.h"
-#include "src/gui/theming.h"
-#include "src/gui/timer.h"
-#include "src/gui/widgets/alert.h"
-#include "src/keybinds/bind.h"
-#include "src/keybinds/keybinds_callbacks.h"
-#include "src/lasr/auto-splitter.h"
-#include "src/logging.h"
-#include "src/runs.h"
-#include "src/settings/settings.h"
-#include "src/settings/utils.h"
-#include "src/timer.h"
+#include "gui/app_window.h"
+#include "gui/actions.h"
+#include "gui/backends/x11.h"
+#include "gui/component/components.h"
+#include "gui/context_menu.h"
+#include "gui/dialogs.h"
+#include "gui/game.h"
+#include "gui/theming.h"
+#include "gui/timer.h"
+#include "gui/widgets/alert.h"
+#include "keybinds/bind.h"
+#include "keybinds/keybinds_callbacks.h"
+#include "lasr/auto-splitter.h"
+#include "logging.h"
+#include "plugins/plugin_loading.h"
+#include "runs.h"
+#include "settings/settings.h"
+#include "settings/utils.h"
+#include "timer.h"
 
 #include <glib-object.h>
 #include <stdatomic.h>
-#include <stdio.h>
 #include <sys/stat.h>
 
 extern atomic_bool exit_requested; /*!< Set to 1 when LibreSplit is exiting */
@@ -186,9 +186,9 @@ static void ls_app_window_default_components(LSAppWindow* win)
 
     LOG_DEBUG("Creating default components...");
 
-    component_init = &ls_components[0];
-
-    while (component_init->name) {
+	// TODO: Change this into a function of the registry now that it exists
+	for (size_t i = 0; i < ls_components.count; ++i) {
+		component_init = &ls_components.components[i];
         if (component_init->is_default) {
             component = component_init->new(NULL);
             if (component) {
@@ -202,8 +202,7 @@ static void ls_app_window_default_components(LSAppWindow* win)
                 win->components = g_list_append(win->components, component);
             }
         }
-        ++component_init;
-    }
+	}
 }
 
 /**
@@ -330,6 +329,7 @@ void ls_app_window_open(LSAppWindow* win, const char* file)
     save_game_join(false);
     stop_auto_splitter();
     strcpy(auto_splitter_file, "");
+	init_components(); // TODO: Ensure this is only called once (or handled gracefully!)
     init_auto_splitter();
 
     if (win->timer) {
@@ -636,7 +636,11 @@ void ls_app_window_destroy(GtkWidget* widget, gpointer data)
     atomic_store(&auto_splitter_enabled, 0);
     atomic_store(&exit_requested, 1);
 
+	// TODO: Confirm the order of this is safe
     ls_app_window_destroy_components(win);
+    free_timer_registries();
+    unload_plugins();
+    close_logger();
 
     LOG_DEBUG("Exit request sent to threads");
     if (win->context_menu) {
@@ -865,6 +869,29 @@ static void ls_app_window_init(LSAppWindow* win)
     gtk_widget_set_margin_bottom(win->box, 0);
     gtk_widget_set_vexpand(win->box, TRUE);
     gtk_box_append(GTK_BOX(win->container), win->box);
+
+	/*
+     * TODO -- This code should be obsolete, holding it commented just in case
+	 * the merge goes silly style
+	 *
+    LOG_DEBUG("Creating components...");
+    init_components();
+    win->components = NULL;
+    for (i = 0; i < ls_components.count; i++) {
+        LSComponent* component = ls_components.components[i].new();
+        if (component) {
+            GtkWidget* widget = component->ops->widget(component);
+            if (widget) {
+                gtk_widget_set_margin_start(widget, WINDOW_PAD);
+                gtk_widget_set_margin_end(widget, WINDOW_PAD);
+                gtk_box_append(GTK_BOX(win->box),
+                    component->ops->widget(component));
+            }
+            win->components = g_list_append(win->components, component);
+        }
+    }
+	 *
+	 */
 
     // NOTE: This always creates an empty footer, no matter how many
     //  ^ "footers" are available, which may give issues with theming

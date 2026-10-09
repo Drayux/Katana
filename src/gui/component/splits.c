@@ -2,10 +2,8 @@
  *
  * Implementation of the splits component.
  */
-#include "components.h"
-
-#include "../../logging.h"
-
+#include "gui/component/components.h"
+#include "logging.h"
 #include <gtk/gtk.h>
 #include <limits.h>
 
