@@ -1,6 +1,6 @@
 #include "gui/folders.h"
 #include "logging.h"
-#include "settings/utils.h"
+#include "environment.h"
 #include <glib.h>
 #include <stdio.h>
 
@@ -52,6 +52,8 @@ static gboolean launch_file_manager(char const * path, GError ** error)
  */
 static bool get_dir_path_for_type(char const * dir, char * path)
 {
+	char const * path_buf = NULL;
+
 	if (dir == NULL || path == NULL) {
 		LOG_WARN("[Open Folder] Invalid usage dir or path are null");
 		return false;
@@ -59,20 +61,20 @@ static bool get_dir_path_for_type(char const * dir, char * path)
 
 	for (size_t i = 0; i < G_N_ELEMENTS(type_map); ++i) {
 		if (g_str_equal(type_map[i].dir, dir)) {
-			bool res = false;
 			switch (type_map[i].type) {
 				case Config:
-					get_libresplit_folder_path(path);
-					res = true;
+					path_buf = get_libresplit_folder_path();
 					break;
 
 				case Data:
-					get_libresplit_data_folder_path(path);
-					res = true;
+					path_buf = get_libresplit_data_folder_path();
 					break;
 			}
 
-			if (res) {
+			if (path_buf) {
+				strcpy(path, path_buf);
+				free((void *) path_buf);
+
 				size_t used = strnlen(path, PATH_MAX);
 				if (used == 0 || used == PATH_MAX) {
 					LOG_ERRF(
@@ -98,7 +100,7 @@ static bool get_dir_path_for_type(char const * dir, char * path)
 				}
 			}
 
-			return res;
+			return (path_buf != NULL);
 		}
 	}
 

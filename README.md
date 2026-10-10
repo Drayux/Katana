@@ -11,7 +11,9 @@ This project is a personal spin on the auto-splitting speedrun timer for Linux. 
 - [ ] KDL data files: Game defintion is now separated from run data, stored in KDL format rather than JSON. Add other runs as pace comparisons!
 - [ ] Plugin support: Lightweight base timer program, functionality can be added via C code or Lua scripts. Even the GUI is optional!
 
-_I am also tentatively planning on keeping the auto-splitter backwards compatible with LibreSplit auto-splitters. This would allow a splitter to be written once for either, or otherwise more easily adopted._
+### Splitters / Resources
+
+_I am tentatively planning on keeping the auto-splitter backwards compatible with LibreSplit auto-splitters. This would allow a splitter to be written once for either, or otherwise more easily adopted._
 
 > For a the public repository of splits, auto splitters and themes. They are located [here](https://github.com/LibreSplit/LibreSplit-resources)
 
@@ -67,7 +69,20 @@ meson setup build -Dbuildtype=release
 meson compile -C build
 ```
 
-The program can be ran without installation by calling `./build/katana` from the build directory.
+The program can be ran without installation by calling `./build/timer/katana` from the build directory.
+> **CTL:** `./build/ctl/katana-ctl`
+
+#### Options (TODO -- probably better for developer guide)
+
+- `LOG_LEVEL` 0, 1, 2, 3, 4 (DEBUG, INFO, WARN, ERROR, FATAL)
+
+#### Targets (TODO -- probably better for developer guide)
+
+Build just a specific target with:
+`meson compile -C build libkatana` # static shared library
+`meson compile -C build katana` # main timer program
+`meson compile -C build katana-plugins` # (TODO) need to determine how to select these
+`meson compile -C build katana-ctl` # extra timer control program (wayland workaround)
 
 ### Installation
 

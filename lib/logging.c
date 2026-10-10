@@ -5,7 +5,8 @@
  * queues, hopes and dreams.
  */
 #include "logging.h"
-#include "settings/utils.h"
+
+#include "environment.h"
 
 #include <linux/limits.h>
 #include <pthread.h>
@@ -102,15 +103,36 @@ static void pop_message(FILE * logfile)
  */
 void * loggingThread(void * arg)
 {
+	char const * const log_file_name = "/libresplit.log";
+	char const * path_buf;
+	char data_path[PATH_MAX + sizeof(log_file_name)];
+	FILE * logfile;
+
 	prctl(PR_SET_NAME, "LS Logger", 0, 0, 0);
-	char data_path[PATH_MAX];
-	get_libresplit_data_folder_path(data_path);
-	strcat(data_path, "/libresplit.log");
-	FILE * logfile = fopen(data_path, "a");
+
+	path_buf = get_libresplit_data_folder_path();
+	if (path_buf) {
+		strcpy(data_path, path_buf);
+		strcat(data_path, "/libresplit.log");
+		free(path_buf);
+	}
+	else {
+		perror("Failed to determine log file directory");
+		return NULL;
+	}
+
+	// TODO: This is maybe not the best approach for this
+	if (strlen(data_path) >= PATH_MAX) {
+		perror("Invalid log file directory (too long)");
+		return NULL;
+	}
+
+	logfile = fopen(data_path, "a");
 	if (!logfile) {
 		perror("Failed to open log file");
 		return NULL;
 	}
+
 	while (atomic_load(&logging_active)) {
 		// Lock the mutex for reading
 		pthread_mutex_lock(&logQueue.lock);

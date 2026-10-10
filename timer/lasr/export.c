@@ -6,7 +6,7 @@
 
 #include "export.h"
 
-#include "../logging.h"
+#include "logging.h"
 
 #include <errno.h>
 #include <stdio.h>

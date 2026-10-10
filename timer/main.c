@@ -1,14 +1,20 @@
+#include "ctl.h"
+#include "environment.h"
+#include "logging.h"
+#include "server.h"
+
 #include "gui/app_window.h"
 #include "gui/dialogs.h"
 #include "gui/timer.h"
+
 #include "keybinds/keybinds_callbacks.h"
+
 #include "lasr/auto-splitter.h"
-#include "logging.h"
+
 #include "plugins/plugin_loading.h"
 #include "plugins/plugin_utils.h"
-#include "server.h"
-#include "settings/utils.h"
-#include "shared.h"
+
+#include "environment.h"
 
 #include <gtk/gtk.h>
 #include <jansson.h>

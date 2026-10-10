@@ -1,25 +1,31 @@
 project('katana', 'c',
     version: 'pre-release',
-    default_options: ['c_std=gnu17'],
     meson_version: '>=1.1',
     default_options: [
+        'c_std=gnu17',
         'buildtype=debug',
-        'warning_level=1'
+        'warning_level=1',
     ])
 
-if get_option('buildtype') == 'release'
-	add_project_arguments('-Wpedantic', '-Werror', language: 'c')
-    add_project_arguments('-DLOG_LEVEL=1', language: 'c')
-else
-    add_project_arguments('-DDEBUG', language: 'c')
-    add_project_arguments('-DLOG_LEVEL=0', language: 'c')
-endif
+# TODO: Ensure the following are set by the warning_level ^^
+# '-Wbad-function-cast',
+# '-Wsign-compare',
 
 add_project_arguments('-DAPP_VERSION="@0@"'.format(meson.project_version()), language: 'c')
 add_project_arguments('-D_GNU_SOURCE=1 ', language: 'c')
 add_project_arguments('-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_16', language: 'c')
 add_project_arguments('-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_16', language: 'c')
 
+# Strict warnings on release builds
+if get_option('buildtype') == 'release'
+	add_project_arguments('-Wpedantic', '-Werror', language: 'c')
+    # add_project_arguments('-DLOG_LEVEL=1', language: 'c') # ERROR by default
+else
+    add_project_arguments('-DDEBUG', language: 'c')
+    add_project_arguments('-DLOG_LEVEL=0', language: 'c')
+endif
+
+# Check for IOCTL map support (else fallback to reading /proc/)
 cc = meson.get_compiler('c')
 has_procmap_ioctl = cc.has_header_symbol('linux/fs.h', 'PROCMAP_QUERY')
 ioctl_maps = get_option('ioctl_maps').enable_auto_if(has_procmap_ioctl)
@@ -27,129 +33,18 @@ if ioctl_maps.enabled()
     add_project_arguments('-DIOCTL_MAPS', language: 'c')
 endif
 
-threads = dependency('threads')
-luajit = dependency('luajit')
-x11 = dependency('x11')
-openssl = dependency('openssl')
-# TODO: These should become optional at some point
-gtk = dependency('gtk4', version: '>= 4.16', include_type: 'system')
-gtk_x11 = dependency('gtk4-x11', version: '>= 4.16', include_type: 'system')
-### (and this one might become a plugin dependency not main project)
-jansson = dependency('jansson')
-###
-
-public_api = include_directories('include')
-private_headers = include_directories('src')
-
-sources = files(
-    'src/gui/actions.c',
-    'src/gui/app_window.c',
-    'src/gui/backends/x11.c',
-
-    # Components
-    'src/gui/component/best-sum.c',
-    'src/gui/component/components.c',
-    'src/gui/component/detailed-timer.c',
-    'src/gui/component/pb.c',
-    'src/gui/component/prev-segment.c',
-    'src/gui/component/splits.c',
-    'src/gui/component/title.c',
-    'src/gui/component/wr.c',
-    'src/gui/context_menu.c',
-    'src/gui/dialogs.c',
-    'src/gui/game.c',
-    'src/gui/theming.c',
-    'src/gui/timer.c',
-
-    # GUI
-    'src/gui/folders.c',
-    'src/gui/utils.c',
-    'src/gui/welcome_box.c',
-    'src/gui/widgets/alert.c',
-    'src/gui/widgets/dialog.c',
-    'src/gui/widgets/help_dialog.c',
-    'src/gui/widgets/settings_dialog.c',
-    'src/keybinds/bind.c',
-
-    # Keybinds
-    'src/keybinds/keybinds.c',
-    'src/keybinds/keybinds_callbacks.c',
-
-    # Plugins
-    'src/plugins/plugin_loading.c',
-    'src/plugins/plugin_utils.c',
-
-
-    # LASR
-    'src/lasr/auto-splitter.c',
-    'src/lasr/export.c',
-    'src/lasr/functions/bitwise.c',
-    'src/lasr/functions/getBaseAddress.c',
-    'src/lasr/functions/getMaps.c',
-    'src/lasr/functions/getModuleSize.c',
-    'src/lasr/functions/getPID.c',
-    'src/lasr/functions/md5.c',
-    'src/lasr/functions/print_tbl.c',
-    'src/lasr/functions/process.c',
-    'src/lasr/functions/readAddress.c',
-    'src/lasr/functions/shallow_copy_tbl.c',
-    'src/lasr/functions/signature.c',
-    'src/lasr/functions/sizeOf.c',
-    'src/lasr/functions/strtoida.c',
-    'src/lasr/maps/maps.c',
-    'src/lasr/memory_iter/memory_iterator.c',
-    'src/lasr/settings.c',
-    'src/lasr/utils.c',
-    'src/logging.c',
-    'src/main.c',
-    'src/runs.c',
-    'src/server.c',
-
-    # Settings
-    'src/settings/definitions.c',
-    'src/settings/settings.c',
-    'src/settings/utils.c',
-    'src/shared.c',
-    'src/timer.c',
-)
-
-ctl_sources = files(
-    'src/ctl.c',
-    'src/shared.c',
-)
-
-gnome = import('gnome')
-resources = gnome.compile_resources(
-    'libresplit-resources',
-    'assets/libresplit.gresource.xml',
-    source_dir: 'assets/resources',
-    c_name: 'katana',
-)
-
-shared_c_flags = [
+extra_c_flags = [
     '-DPREFIX="' + get_option('prefix') + '"',
     '-DDATADIR="' + get_option('datadir') + '"',
-    '-Wbad-function-cast',
-    '-Wsign-compare',
 ]
 
-executable(
-    'katana',
-    sources,
-    resources,
-    dependencies: [threads, gtk, gtk_x11, luajit, x11, jansson, openssl],
-    c_args: shared_c_flags,
-    install: true,
-    include_directories: [public_api, private_headers],
-)
+subdir('lib')
+subdir('timer')
+subdir('ctl')
+# TODO: subdir('plugins')
 
-executable(
-    'katana-ctl',
-    ctl_sources,
-    c_args: shared_c_flags,
-    install: true,
-    include_directories: [public_api, private_headers],
-)
+
+# -- INSTALLATION --
 
 message('prefix: ' + get_option('prefix')) # /usr/local by default
 message('datadir: ' + get_option('datadir')) # share by default
@@ -185,12 +80,18 @@ install_data(
     install_mode: 'rw-r--r--',
 )
 
+#gnome.post_install(update_desktop_database: true, gtk_update_icon_cache: true)
+gnome.post_install(gtk_update_icon_cache: true)
+
+
+# -- TESTS --
+
 # Code formatting test
 clang_format = find_program('clang-format', required: false)
 if clang_format.found()
     # Check LibreSplit
     test(
-        'clang-format-libresplit',
+        'clang-format-timer',
         clang_format,
         args: [
             '--dry-run',
@@ -204,7 +105,7 @@ if clang_format.found()
         clang_format,
         args: [
             '--dry-run',
-            '--Werror', ctl_sources,
+            '--Werror', 'src/ctl.h', 'src/ctl.c',
         ],
         suite: 'format',
     )
@@ -230,7 +131,7 @@ if cppcheck.found()
     ]
     # Check LibreSplit
     test(
-        'cppcheck-libresplit',
+        'cppcheck-timer',
         cppcheck,
         args: cppcheck_base_args + sources,
         suite: 'lint',
@@ -239,12 +140,9 @@ if cppcheck.found()
     test(
         'cppcheck-ctl',
         cppcheck,
-        args: cppcheck_base_args + ctl_sources,
+        args: cppcheck_base_args + 'src/ctl.h src/ctl.c',
         suite: 'lint',
     )
 else
     message('cppcheck not found, skipping linting test')
 endif
-
-#gnome.post_install(update_desktop_database: true, gtk_update_icon_cache: true)
-gnome.post_install(gtk_update_icon_cache: true)

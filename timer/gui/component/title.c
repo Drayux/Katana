@@ -6,7 +6,7 @@
 
 #include "../../lasr/export.h"
 #include "../../lasr/utils.h"
-#include "../../logging.h"
+#include "logging.h"
 
 /**
  * @brief The component representing the title.

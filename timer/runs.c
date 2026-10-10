@@ -1,8 +1,10 @@
 #include "runs.h"
+
+#include "environment.h"
+
 #include "gui/game.h"
 #include "gui/widgets/dialog.h"
 #include "logging.h"
-#include "settings/utils.h"
 #include <string.h>
 #include <sys/stat.h>
 
@@ -533,10 +535,13 @@ static json_t * get_or_create_runs_history(ls_game const * game,
 		written = snprintf(path, PATH_MAX, "%.*s", (int) len, base);
 	}
 	else {
-		char libresplit_directory[PATH_MAX];
-		get_libresplit_folder_path(libresplit_directory);
-		written = snprintf(path, PATH_MAX, "%s/runs/%.*s", libresplit_directory,
-			(int) len, base);
+		char const * libresplit_directory;
+		libresplit_directory = get_libresplit_folder_path();
+		if (libresplit_directory) {
+			written = snprintf(path, PATH_MAX, "%s/runs/%.*s", libresplit_directory,
+				(int) len, base);
+			free((void *) libresplit_directory);
+		}
 	}
 
 	if (written < 0 || written >= PATH_MAX) {
@@ -553,9 +558,8 @@ static json_t * get_or_create_runs_history(ls_game const * game,
 	}
 
 	len = (size_t) written;
-	if (!create_default_directory(
-			game->runs_dir ? game->runs_dir : "runs history directory", path,
-			0755, win)) {
+	if (!create_default_directory( game->runs_dir ?
+			game->runs_dir : "runs history directory", path, 0755)) {
 		return NULL;
 	}
 

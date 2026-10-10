@@ -3,18 +3,20 @@
  * Implementation of the timer
  */
 #include "timer.h"
+
+#include "environment.h"
+#include "logging.h"
+#include "runs.h"
+#include "timer.h"
+
 #include "gui/app_window.h"
 #include "gui/game.h"
 #include "gui/widgets/dialog.h"
 #include "logging.h"
 #include "plugins/plugin_api.h"
 #include "plugins/plugin_utils.h"
-#include "runs.h"
-#include "settings/utils.h"
-#include "timer.h"
 
 #include "lasr/auto-splitter.h"
-#include "logging.h"
 
 #include <glib/gstdio.h>
 #include <limits.h>

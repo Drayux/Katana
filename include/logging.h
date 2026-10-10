@@ -1,3 +1,19 @@
+/*
+ * LOGGING SUPPORT
+ *
+ * (TODO) I want to improve logging efforts across the entire project.
+ * To start this, some rough definitions on what level to put where:
+ *
+ * FATAL: The program has reached a state where it cannot continue
+ *        (Try to catch this, but there's a good chance we just crash.)
+ * ERROR: Failed assertion (i.e. an unexpected free(0) even if we caught it
+ *        instead of segfaulting) or a state that is certain to be broken.
+ *  WARN: A failure path was taken, but major functions can continue.
+ *  INFO: Verbose information about the state of operation (i.e. defaults
+ *        loaded, timer started, CTL command received, etc.)
+ * DEBUG: (Not sure what's worth putting here yet.)
+ */
+
 #pragma once
 
 #include <pthread.h>
@@ -31,12 +47,14 @@ void close_logger();
 void * loggingThread(void * arg);
 
 #define LOG_LEVEL_DEBUG 0
-#define LOG_LEVEL_INFO 1
-#define LOG_LEVEL_WARN 2
-#define LOG_LEVEL_ERR 3
+#define LOG_LEVEL_INFO  1
+#define LOG_LEVEL_WARN  2
+#define LOG_LEVEL_ERROR 3
+#define LOG_LEVEL_FATAL 4
 
+/* Only show error and fatal by default */
 #if !defined(LOG_LEVEL)
-#define LOG_LEVEL LOG_LEVEL_ERR
+#define LOG_LEVEL LOG_LEVEL_ERROR
 #endif
 
 #define LOG__XSTR(x) #x
@@ -57,33 +75,41 @@ void * loggingThread(void * arg);
 	}
 
 #if LOG_LEVEL == LOG_LEVEL_DEBUG
-#define LOG_DEBUG(message) LOG([Debug], message);
-#define LOG_DEBUGF(fmt, ...) LOGF([Debug], fmt, __VA_ARGS__);
+#define LOG_DEBUG(message) LOG([DEBUG], message);
+#define LOG_DEBUGF(fmt, ...) LOGF([DEBUG], fmt, __VA_ARGS__);
 #else
 #define LOG_DEBUG(fmt, ...)
 #define LOG_DEBUGF(fmt, ...)
 #endif
 
 #if LOG_LEVEL <= LOG_LEVEL_INFO
-#define LOG_INFO(message) LOG([Info], message);
-#define LOG_INFOF(fmt, ...) LOGF([Info], fmt, __VA_ARGS__);
+#define LOG_INFO(message) LOG([INFO], message);
+#define LOG_INFOF(fmt, ...) LOGF([INFO], fmt, __VA_ARGS__);
 #else
 #define LOG_INFO(message)
 #define LOG_INFOF(fmt, ...)
 #endif
 
 #if LOG_LEVEL <= LOG_LEVEL_WARN
-#define LOG_WARN(message) LOG([Warn], message);
-#define LOG_WARNF(fmt, ...) LOGF([Warn], fmt, __VA_ARGS__);
+#define LOG_WARN(message) LOG([WARN], message);
+#define LOG_WARNF(fmt, ...) LOGF([WARN], fmt, __VA_ARGS__);
 #else
 #define LOG_WARN(message)
 #define LOG_WARNF(fmt, ...)
 #endif
 
-#if LOG_LEVEL <= LOG_LEVEL_ERR
-#define LOG_ERR(message) LOG([ERR], message);
-#define LOG_ERRF(fmt, ...) LOGF([ERR], fmt, __VA_ARGS__);
+#if LOG_LEVEL <= LOG_LEVEL_ERROR
+#define LOG_ERR(message) LOG([ERROR], message);
+#define LOG_ERRF(fmt, ...) LOGF([ERROR], fmt, __VA_ARGS__);
 #else
 #define LOG_ERR(message)
 #define LOG_ERRF(fmt, ...)
+#endif
+
+#if LOG_LEVEL <= LOG_LEVEL_FATAL
+#define LOG_FATAL(message) LOG([FATAL], message);
+#define LOG_FATALF(fmt, ...) LOGF([FATAL], fmt, __VA_ARGS__);
+#else
+#define LOG_FATAL(message)
+#define LOG_FATALF(fmt, ...)
 #endif

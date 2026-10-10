@@ -2,7 +2,7 @@
 #include "gtk/gtk.h"
 #include "logging.h"
 #include "plugins/plugin_utils.h"
-#include "settings/utils.h"
+#include "environment.h"
 #include <assert.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -321,9 +321,18 @@ void load_plugins(void)
 		return;
 	}
 	char plugdir[PATH_MAX];
-	get_libresplit_data_folder_path(plugdir);
-	strlcat(plugdir, "/plugins/", sizeof(plugdir));
-	LOG_DEBUGF("Plugin Directory is: %s", plugdir);
+	char const * plug_path_buf;
+	plug_path_buf = get_libresplit_data_folder_path();
+	if (plug_path_buf) {
+		strcpy(plugdir, plug_path_buf);
+		strlcat(plugdir, "/plugins/", sizeof(plugdir));
+		free(plug_path_buf);
+	}
+	else {
+		LOG_WARN("Unable to determine plugins directory");
+		return;
+	}
+	LOG_INFOF("Plugin directory is: %s", plugdir);
 	DIR * dir = opendir(plugdir);
 	if (!dir) {
 		LOG_WARNF("Unable to open plugins directory: %s", plugdir);

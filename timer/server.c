@@ -1,5 +1,6 @@
 #include "logging.h"
-#include "shared.h"
+#include "ctl.h"
+#include "environment.h"
 
 #include <arpa/inet.h>
 #include <glib.h>

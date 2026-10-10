@@ -15,7 +15,7 @@
 #include "plugins/plugin_loading.h"
 #include "runs.h"
 #include "settings/settings.h"
-#include "settings/utils.h"
+#include "environment.h"
 #include "timer.h"
 
 #include <glib-object.h>
@@ -823,8 +823,14 @@ static void ls_app_window_init(LSAppWindow * win)
 	win->resize_cursor_hover = false;
 
 	// make data path
+	char const * path_buf;
 	win->data_path[0] = '\0';
-	get_libresplit_folder_path(win->data_path);
+	path_buf = get_libresplit_folder_path();
+	if (path_buf) {
+		strcpy(win->data_path, path_buf);
+		free((void *) path_buf);
+	}
+	// TODO: Do we need a fail path here?
 
 	// load settings
 	LOG_DEBUG("Loading Settings...");

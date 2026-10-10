@@ -12,7 +12,7 @@
 #include "logging.h"
 #include "runs.h"
 #include "settings/settings.h"
-#include "settings/utils.h"
+#include "environment.h"
 #include <gtk/gtk.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
@@ -134,8 +134,7 @@ void open_activated(GSimpleAction * action, GVariant * parameter, gpointer app)
 		// splits path and eventually create it
 		strcpy(splits_path, win->data_path);
 		strcat(splits_path, "/splits");
-		if (!create_default_directory(
-				"Splits", splits_path, 0755, GTK_WINDOW(win))) {
+		if (!create_default_directory("Splits", splits_path, 0755)) {
 			return;
 		}
 	}
@@ -478,8 +477,7 @@ void open_auto_splitter(
 	if (use_default_path) {
 		strcpy(auto_splitters_path, win->data_path);
 		strcat(auto_splitters_path, "/auto-splitters");
-		if (!create_default_directory(
-				"Auto Splitters", auto_splitters_path, 0755, GTK_WINDOW(win))) {
+		if (!create_default_directory("Auto Splitters", auto_splitters_path, 0755)) {
 			return;
 		}
 	}

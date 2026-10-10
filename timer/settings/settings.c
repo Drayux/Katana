@@ -3,9 +3,10 @@
  * Implementation of the settings management
  */
 #include "settings/settings.h"
+
+#include "environment.h"
 #include "gui/backends/x11.h"
 #include "settings/definitions.h"
-#include "settings/utils.h"
 
 #include <linux/limits.h>
 #include <pwd.h>
@@ -119,9 +120,20 @@ static void post_init(void)
  */
 bool config_init(void)
 {
+	char const * folder_path_buf;
 	char path[PATH_MAX] = {0};
-	get_libresplit_folder_path(path);
-	strcat(path, "/settings.json");
+	folder_path_buf = get_libresplit_folder_path();
+	if (folder_path_buf) {
+		snprintf(path, PATH_MAX, "%s/settings.json", folder_path_buf);
+		free((void *) folder_path_buf);
+
+		// TODO: Not currently checking for truncation, but we should
+		// Old code did not though and I'm still in the "recreate old
+		// functionality" phase
+	}
+	else {
+		return false;
+	}
 
 	// cfg is already initialized with defaults
 	// so we just have to overwrite them
@@ -193,9 +205,16 @@ bool config_save(void)
 		json_object_set_new(root, sec->name, sec_obj);
 	}
 
+	char const * folder_path_buf;
 	char path[PATH_MAX] = {0};
-	get_libresplit_folder_path(path);
-	strcat(path, "/settings.json");
+	folder_path_buf = get_libresplit_folder_path();
+	if (folder_path_buf) {
+		snprintf(path, PATH_MAX, "%s/settings.json", folder_path_buf);
+		free((void *) folder_path_buf);
+	}
+	else {
+		return false;
+	}
 
 	check_directories();
 	int ret = json_dump_file(root, path, JSON_INDENT(2) | JSON_PRESERVE_ORDER);
