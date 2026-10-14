@@ -77,9 +77,11 @@ sources = files(
     'lasr/memory_iter/memory_iterator.c',
     'lasr/settings.c',
     'lasr/utils.c',
+
+    'ipc_server.c',
+    'gui.c',
     'main.c',
     'runs.c',
-    'server.c',
     'timer.c',
 
     # Settings

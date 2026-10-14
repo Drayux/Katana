@@ -18,22 +18,88 @@
 #include <sys/prctl.h>
 #include <time.h>
 
-/*! The log queue, used as buffer */
-static LogQueue logQueue;
+/** \brief The Log Buffer
+ *
+ * Allows to memorize messages in a circular queue for the
+ * logging thread to consume
+ */
+static struct {
+	char message_queue[LOG_QUEUE_SIZE]
+					  [LOG_STR_LEN]; /*!< The read circular queue */
+	int head;						 /*!< Index of the head of the queue */
+	int tail;						 /*!< Index of the tail of the queue */
+	pthread_mutex_t lock;			 /*!< Lock to avoid race conditions */
+	pthread_cond_t cond; /*!< Condition to signal between the logMessage
+							function and the logging thread */
+	FILE * logfile;
+} logQueue = { 0 };
+
 /*! Atomic bool used to keep the thread active, might be used for clean closing
  * in future */
 static atomic_bool logging_active;
 
 /**
- * Initializes the log queue, ready to receive messages
+ * Pops a message from the log queue, writing it into console
+ * and the log file. Just a utility.
+ *
+ * @param logfile The File pointer to write into
  */
-void initLogQueue(void)
+static void _pop_message(void)
 {
+	fprintf(stderr, "%s", logQueue.message_queue[logQueue.head]);
+
+	// Log to file, if successfully initialized
+	if (logQueue.logfile) {
+		fprintf(logQueue.logfile, "%s", logQueue.message_queue[logQueue.head]);
+		fflush(logQueue.logfile);
+	}
+
+	logQueue.head = (logQueue.head + 1) % LOG_QUEUE_SIZE;
+}
+
+/**
+ * Initializes the log queue, ready to receive messages
+ * 
+ * @return 0 on success
+ */
+int logging_init(void)
+{
+	char const * const log_file_name = "/libresplit.log";
+	char const * path_buf;
+	char data_path[PATH_MAX + sizeof(log_file_name)];
+
 	logQueue.head = 0;
 	logQueue.tail = 0;
 	pthread_mutex_init(&logQueue.lock, NULL);
 	pthread_cond_init(&logQueue.cond, NULL);
-	logging_active = 1;
+	atomic_store(&logging_active, 1);
+
+	prctl(PR_SET_NAME, "LS Logger", 0, 0, 0);
+
+	path_buf = get_libresplit_data_folder_path();
+	if (path_buf) {
+		strcpy(data_path, path_buf);
+		strcat(data_path, "/libresplit.log");
+		free((void *) path_buf);
+	}
+	else {
+		perror("Failed to determine log file directory");
+		return 1;
+	}
+
+	// TODO: This is maybe not the best approach for this
+	if (strlen(data_path) >= PATH_MAX) {
+		fprintf(stderr, "Invalid log file directory (too long)");
+		return 1;
+	}
+
+	logQueue.logfile = fopen(data_path, "a");
+	if (!logQueue.logfile) {
+		perror("Failed to open log file");
+		return 1;
+	}
+
+	return 0;
 }
 
 /**
@@ -75,26 +141,6 @@ void logMessage(char const * fmt, ...)
 }
 
 /**
- * Pops a message from the log queue, writing it into console
- * and the log file. Just a utility.
- *
- * @param logfile The File pointer to write into
- */
-static void pop_message(FILE * logfile)
-{
-	// Remove a message from the queue
-	// We don't empty the whole queue to avoid being a bottleneck for the
-	// addition of new messages.
-	// Log to console
-	printf("%s", logQueue.message_queue[logQueue.head]);
-	// Log to file
-	fprintf(logfile, "%s", logQueue.message_queue[logQueue.head]);
-	// Flush the file immediately to disk, in case something crashes
-	fflush(logfile);
-	logQueue.head = (logQueue.head + 1) % LOG_QUEUE_SIZE;
-}
-
-/**
  * The logging thread, writes the queued messages in the log.
  *
  * Works as a consumer
@@ -103,58 +149,32 @@ static void pop_message(FILE * logfile)
  */
 void * loggingThread(void * arg)
 {
-	char const * const log_file_name = "/libresplit.log";
-	char const * path_buf;
-	char data_path[PATH_MAX + sizeof(log_file_name)];
-	FILE * logfile;
-
-	prctl(PR_SET_NAME, "LS Logger", 0, 0, 0);
-
-	path_buf = get_libresplit_data_folder_path();
-	if (path_buf) {
-		strcpy(data_path, path_buf);
-		strcat(data_path, "/libresplit.log");
-		free(path_buf);
-	}
-	else {
-		perror("Failed to determine log file directory");
-		return NULL;
-	}
-
-	// TODO: This is maybe not the best approach for this
-	if (strlen(data_path) >= PATH_MAX) {
-		perror("Invalid log file directory (too long)");
-		return NULL;
-	}
-
-	logfile = fopen(data_path, "a");
-	if (!logfile) {
-		perror("Failed to open log file");
-		return NULL;
-	}
-
-	while (atomic_load(&logging_active)) {
-		// Lock the mutex for reading
+	while (1) {
 		pthread_mutex_lock(&logQueue.lock);
-		// If the queue is empty, wait
 		while (logQueue.head == logQueue.tail) {
+			// unlocks the mutex, waits for a signal
 			pthread_cond_wait(&logQueue.cond, &logQueue.lock);
-			// We got signalled by the main thread to close up
 			if (!atomic_load(&logging_active)) {
-				break;
+				// TODO: probably don't need this??
+				LOG_INFO("Logging thread exiting");
+				pthread_mutex_unlock(&logQueue.lock);
+				return NULL;
 			}
 		}
-		pop_message(logfile);
-		// Unlock the mutex
+		_pop_message();
+		// TODO: probably don't need this??
 		pthread_mutex_unlock(&logQueue.lock);
 	}
-	// We're closing the logger, empty the remaining logs...
+	LOG_WARN("Logging never initialized");
+	return NULL;
+}
+
+void logging_dumpall(void) {
+	pthread_mutex_lock(&logQueue.lock);
 	while (logQueue.head != logQueue.tail) {
-		pop_message(logfile);
+		_pop_message();
 	}
-	// ... and close the logfile
-	fclose(logfile);
-	return 0;
+	pthread_mutex_unlock(&logQueue.lock);
 }
 
 /**
@@ -164,12 +184,15 @@ void * loggingThread(void * arg)
  * the queue to fill up. If that's the case, we signal the thread to continue
  * after setting logging_active to false.
  */
-void close_logger()
+void logging_shutdown(void)
 {
-	atomic_store(&logging_active, 0);
 	LOG_DEBUG("Shutting down logger thread...")
-	// Signal the logging thread to continue, so to hit the closing condition,
-	// in case it is waiting for the log queue to fill. If it isn't, the signal
-	// should be ignored.
+
+	atomic_store(&logging_active, 0);
 	pthread_cond_signal(&logQueue.cond);
+
+	logging_dumpall();
+	if (logQueue.logfile) {
+		fclose(logQueue.logfile);
+	}
 }

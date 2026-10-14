@@ -538,8 +538,8 @@ static json_t * get_or_create_runs_history(ls_game const * game,
 		char const * libresplit_directory;
 		libresplit_directory = get_libresplit_folder_path();
 		if (libresplit_directory) {
-			written = snprintf(path, PATH_MAX, "%s/runs/%.*s", libresplit_directory,
-				(int) len, base);
+			written = snprintf(path, PATH_MAX, "%s/runs/%.*s",
+				libresplit_directory, (int) len, base);
 			free((void *) libresplit_directory);
 		}
 	}
@@ -558,8 +558,9 @@ static json_t * get_or_create_runs_history(ls_game const * game,
 	}
 
 	len = (size_t) written;
-	if (!create_default_directory( game->runs_dir ?
-			game->runs_dir : "runs history directory", path, 0755)) {
+	if (!create_default_directory(
+			game->runs_dir ? game->runs_dir : "runs history directory", path,
+			0755)) {
 		return NULL;
 	}
 

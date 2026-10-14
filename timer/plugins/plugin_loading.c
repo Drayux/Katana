@@ -1,8 +1,8 @@
 #include "plugins/plugin_loading.h"
+#include "environment.h"
 #include "gtk/gtk.h"
 #include "logging.h"
 #include "plugins/plugin_utils.h"
-#include "environment.h"
 #include <assert.h>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -326,7 +326,7 @@ void load_plugins(void)
 	if (plug_path_buf) {
 		strcpy(plugdir, plug_path_buf);
 		strlcat(plugdir, "/plugins/", sizeof(plugdir));
-		free(plug_path_buf);
+		free((void *) plug_path_buf);
 	}
 	else {
 		LOG_WARN("Unable to determine plugins directory");

@@ -1,6 +1,7 @@
-#include "logging.h"
-#include "ctl.h"
+#include "ipc_server.h"
+
 #include "environment.h"
+#include "logging.h"
 
 #include <arpa/inet.h>
 #include <glib.h>
@@ -27,8 +28,55 @@ typedef struct CommandData {
  * External functions from main.c to handle commands
  *
  * @param command The command to be handled.
+ *
+ * TODO: Stubbed out for now, figure out how to plug this in after refactoring
+ * the timer logic.
+ * That said, it should be something a handler can subscribe to, so that
+ * plugins can create CTL comamnds as well
  */
-extern void handle_ctl_command(CTLCommand command);
+static void handle_ctl_command(CTLCommand command)
+{
+	// if (!g_app) {
+	// LOG_INFO("No application instance available to handle commands");
+	// return;
+	// }
+
+	// LSAppWindow * win = ls_get_main_app_window();
+	// if (!win) {
+	// LOG_INFO("No window available to handle commands");
+	// return;
+	// }
+
+	switch (command) {
+		case CTL_CMD_START_SPLIT:
+			LOG_DEBUG("Split requested via Server Command");
+			// timer_start_split(win);
+			break;
+		case CTL_CMD_STOP_RESET:
+			LOG_DEBUG("Run Stop/Reset requested via Server Command");
+			// timer_stop_or_reset(win);
+			break;
+		case CTL_CMD_CANCEL:
+			LOG_DEBUG("Run Cancellation requested via Server Command");
+			// timer_cancel_run(win);
+			break;
+		case CTL_CMD_UNSPLIT:
+			LOG_DEBUG("Unsplit requested via Server Command");
+			// timer_unsplit(win);
+			break;
+		case CTL_CMD_SKIP:
+			LOG_DEBUG("Skip requested via Server Command");
+			// timer_skip(win);
+			break;
+		case CTL_CMD_EXIT:
+			LOG_DEBUG("Exit requested via Server Command");
+			// ls_app_window_quit(win);
+			break;
+		default:
+			LOG_INFOF("Unknown CTL command: %d", command);
+			break;
+	}
+}
 
 /**
  * Command execution function that runs on the main thread
@@ -54,9 +102,8 @@ static gboolean execute_command_on_main_thread(gpointer data)
  *
  * @return Zero if a full message was received, non-zero otherwise.
  */
-int receive_message(int sockfd, CTLMessage ** out)
+static int receive_message(int sockfd, CTLMessage ** out)
 {
-
 	// Read header (blocking)
 	uint32_t len = 0;
 	ssize_t n = read(sockfd, &len, sizeof(len));
@@ -92,43 +139,16 @@ int receive_message(int sockfd, CTLMessage ** out)
  *
  * @param arg The arguments to pass to the thread
  */
-void * ls_ctl_server(void * arg)
+static void * ipc_server_thread(void * arg)
 {
+	char * socket_path;
+	int server_fd;
+
 	prctl(PR_SET_NAME, "LS CTL Server", 0, 0, 0);
 
-	char runtime_dir[PATH_MAX - 17];
-	getXDGruntimeDir(runtime_dir, sizeof(runtime_dir));
-	if (strlen(runtime_dir) == 0) {
-		fprintf(stderr, "Failed to get LibreSplit socket path.\n");
-		return 0;
-	}
-
-	char socket_path[PATH_MAX];
-	snprintf(socket_path, PATH_MAX, "%s/%s", runtime_dir, LIBRESPLIT_SOCK_NAME);
-
-	int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	server_fd = ipc_create_listener();
 	if (server_fd < 0) {
-		perror("Failed to create socket");
-		return 0;
-	}
-
-	struct sockaddr_un addr;
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, socket_path);
-
-	unlink(socket_path);
-
-	if (bind(server_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-		perror("Failed to bind socket");
-		close(server_fd);
-		return 0;
-	}
-
-	if (listen(server_fd, 20) < 0) { // backlog for many short connections
-		perror("Failed to listen on socket");
-		close(server_fd);
-		return 0;
+		return NULL;
 	}
 
 	while (1) {
@@ -168,12 +188,14 @@ void * ls_ctl_server(void * arg)
 
 			if (result == 0) {
 				if (msg->length == sizeof(CTLCommand)) {
-					CTLCommand command = *(CTLCommand *) msg->message;
-					CommandData * cmd_data = g_malloc(sizeof(CommandData));
-					cmd_data->command = command;
+					// CTLCommand command = *(CTLCommand *) msg->message;
+					// CommandData * cmd_data = g_malloc(sizeof(CommandData));
+					// cmd_data->command = command;
 
 					// Queue command execution on main thread
-					g_idle_add(execute_command_on_main_thread, cmd_data);
+					// g_idle_add(execute_command_on_main_thread, cmd_data);
+
+					printf("Received data: %d\n", *((int *) msg->message));
 				}
 				else {
 					printf("Invalid message length: %u (expected %zu)\n",
@@ -190,8 +212,22 @@ void * ls_ctl_server(void * arg)
 		}
 	}
 
+	LOG_INFO("IPC server thread exiting");
 	close(server_fd);
-	unlink(socket_path);
+	if ((socket_path = ipc_get_socket_path())) {
+		unlink(socket_path);
+		free(socket_path);
+	}
 
-	return 0;
+	return NULL;
+}
+
+// Launches the IPC server, and returns the thread, if successful.
+void ipc_server_thread_start(pthread_t * thread)
+{
+	if (!thread) {
+		LOG_ERR("NULL arg passed");
+		return;
+	}
+	pthread_create(thread, NULL, &ipc_server_thread, NULL);
 }

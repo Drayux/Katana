@@ -3,9 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LIBRESPLIT_SOCK_NAME "libresplit.sock"
-
-void getXDGruntimeDir(char * buffer, size_t size);
+#define LIBRESPLIT_SOCK_NAME "katana.sock"
 
 /**
  * Available Libresplitctl commands
@@ -26,3 +24,7 @@ typedef struct __attribute__((__packed__)) CTLMessage {
 	uint32_t length;	  /*!< Size of message in bytes */
 	CTLCommand message[]; /*!< The message sent */
 } CTLMessage;
+
+char * ipc_get_socket_path(void);
+int ipc_connect(void);
+int ipc_create_listener(void);

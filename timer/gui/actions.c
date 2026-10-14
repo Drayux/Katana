@@ -1,4 +1,5 @@
 #include "gui/actions.h"
+#include "environment.h"
 #include "gio/gio.h"
 #include "gui/app_window.h"
 #include "gui/backends/x11.h"
@@ -12,7 +13,6 @@
 #include "logging.h"
 #include "runs.h"
 #include "settings/settings.h"
-#include "environment.h"
 #include <gtk/gtk.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
@@ -477,7 +477,8 @@ void open_auto_splitter(
 	if (use_default_path) {
 		strcpy(auto_splitters_path, win->data_path);
 		strcat(auto_splitters_path, "/auto-splitters");
-		if (!create_default_directory("Auto Splitters", auto_splitters_path, 0755)) {
+		if (!create_default_directory(
+				"Auto Splitters", auto_splitters_path, 0755)) {
 			return;
 		}
 	}

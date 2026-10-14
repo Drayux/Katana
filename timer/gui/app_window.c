@@ -1,4 +1,5 @@
 #include "gui/app_window.h"
+#include "environment.h"
 #include "gui/actions.h"
 #include "gui/backends/x11.h"
 #include "gui/component/components.h"
@@ -15,14 +16,13 @@
 #include "plugins/plugin_loading.h"
 #include "runs.h"
 #include "settings/settings.h"
-#include "environment.h"
 #include "timer.h"
 
 #include <glib-object.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
 
-extern atomic_bool exit_requested; /*!< Set to 1 when LibreSplit is exiting */
+atomic_bool exit_requested = 0; /*!< Set to 1 when LibreSplit is exiting */
 
 static void ls_app_init(LSApp * app) {}
 
@@ -657,11 +657,11 @@ void ls_app_window_destroy(GtkWidget * widget, gpointer data)
 	atomic_store(&auto_splitter_enabled, 0);
 	atomic_store(&exit_requested, 1);
 
-	// TODO: Confirm the order of this is safe
+	// TODO: Move this all to logic in main. The window should only request a
+	// shutdown
 	ls_app_window_destroy_components(win);
 	free_timer_registries();
 	unload_plugins();
-	close_logger();
 
 	LOG_DEBUG("Exit request sent to threads");
 	if (win->context_menu) {
@@ -682,7 +682,7 @@ void ls_app_window_destroy(GtkWidget * widget, gpointer data)
 		}
 		g_list_free(snapshot);
 	}
-	close_logger();
+	// close_logger();
 	g_application_quit(G_APPLICATION(app));
 }
 

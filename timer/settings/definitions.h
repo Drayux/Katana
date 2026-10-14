@@ -16,7 +16,7 @@ typedef union ConfigValue {
 	bool b;		  // For boolean values
 	int i;		  // For integer values
 	char s[4096]; // For string values 4096 should be adequate for all use cases
-	// More can be added here in the future if needed
+				  // More can be added here in the future if needed
 } ConfigValue;
 
 typedef struct ConfigEntry {

@@ -105,7 +105,7 @@ if clang_format.found()
         clang_format,
         args: [
             '--dry-run',
-            '--Werror', 'src/ctl.h', 'src/ctl.c',
+            '--Werror', 'src/ctl.c',
         ],
         suite: 'format',
     )
@@ -114,6 +114,8 @@ else
 endif
 
 # Static analysis + Linting
+# TODO: I've since made more build targets, so this might not cover everything
+# or even fail outright
 cppcheck = find_program('cppcheck', required: false)
 if cppcheck.found()
     # Set args for analysing both sources.
@@ -140,7 +142,7 @@ if cppcheck.found()
     test(
         'cppcheck-ctl',
         cppcheck,
-        args: cppcheck_base_args + 'src/ctl.h src/ctl.c',
+        args: cppcheck_base_args + 'src/ctl.c',
         suite: 'lint',
     )
 else

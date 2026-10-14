@@ -24,25 +24,11 @@
 
 extern atomic_bool exit_requested;
 
-/** \brief The Log Buffer
- *
- * Allows to memorize messages in a circular queue for the
- * logging thread to consume
- */
-typedef struct LogQueue {
-	char message_queue[LOG_QUEUE_SIZE]
-					  [LOG_STR_LEN]; /*!< The read circular queue */
-	int head;						 /*!< Index of the head of the queue */
-	int tail;						 /*!< Index of the tail of the queue */
-	pthread_mutex_t lock;			 /*!< Lock to avoid race conditions */
-	pthread_cond_t cond; /*!< Condition to signal between the logMessage
-							function and the logging thread */
-} LogQueue;
-
-void initLogQueue(void);
+int logging_init(void);
+void logging_dumpall(void);
+void logging_shutdown(void);
 
 void logMessage(char const * fmt, ...);
-void close_logger();
 
 void * loggingThread(void * arg);
 
