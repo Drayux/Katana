@@ -25,11 +25,10 @@
 extern atomic_bool exit_requested;
 
 int logging_init(void);
-void logging_dumpall(void);
 void logging_shutdown(void);
+void logging_dumpall(void);
 
 void logMessage(char const * fmt, ...);
-
 void * loggingThread(void * arg);
 
 #define LOG_LEVEL_DEBUG 0

@@ -6,11 +6,6 @@
 #include "plugins/plugin_loading.h"
 #include "plugins/plugin_utils.h"
 
-// Try to remove me section
-#include <sys/prctl.h>
-// #include <stdbool.h>
-// #include <stdatomic.h>
-
 /**
  * LibreSplit's auto splitter thread.
  *
@@ -49,6 +44,7 @@ int main(int argc, char * argv[])
 	int status = 0; // OK
 	char const * envvar;
 	int sockfd;
+	app_cmd_t cmd;
 
 	/* GTK handles its own thread, so we don't need this for now. When I come
 	 * back to revising the windowing logic, I will probably want it to take
@@ -70,8 +66,9 @@ int main(int argc, char * argv[])
 		envvar = getenv("BYPASS_ROOT_PROTECTION");
 		if (!envvar || strcmp(envvar, "1")) {
 			LOG_FATAL("Bypass root protection not enabled");
-			status = 1;
-			goto shutdown;
+			// Threads not yet started
+			logging_dumpall();
+			return 1;
 		}
 	}
 
@@ -91,8 +88,11 @@ int main(int argc, char * argv[])
 		close(sockfd);
 		LOG_FATAL(
 			"Katana is already open, and more than one instance introduces "
-			"a lot of bugs that you don't want to deal with. Exiting.");
-		goto shutdown;
+			"a lot of bugs that you don't want to deal with. Exiting."
+		);
+		// Threads not yet started
+		logging_dumpall();
+		return 1;
 	}
 	LOG_DEBUG("Init IPC server thread");
 	ipc_server_thread_start(&ipc_thread);
@@ -113,17 +113,49 @@ int main(int argc, char * argv[])
 	// gui_thread_start(&gui_thread);
 	(void) gui_start();
 
-	// LOG_INFO("Creating Auto-Splitter Thread");
 	// pthread_t t1; // Auto-splitter thread
 	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
 	// pthread_join(t1, NULL);
 
+	LOG_INFO("Starting application loop");
+	while ((cmd = app_cmd_poll())) {
+
+		/* This portion is still a very rough WIP.
+		 *
+		 * Ultimately, the core timer is just a simple state machine, it needs
+		 * no incremental stepping. Thus, the direction I'm heading is a new
+		 * timer which is just that: a singleton state machine.
+		 *
+		 * To handle various thread inputs to the timer (i.e. GUI key event,
+		 * IPC socket, autosplitter, plugin, etc., instead of locking the
+		 * timer in a mutex or polling every thread individually, any thread
+		 * with an event ready need just trigger a shared pipe.
+		 *
+		 * Because of the potenial made available with the lua runtime, I will
+		 * be moving that logic to the main thread, here.
+		 */
+
+		switch (cmd) {
+			default:
+				LOG_ERRORF("Unsupported main loop event: %d", (int) cmd);
+				continue;
+
+			case APP_CMD_START:
+				break;
+			case APP_CMD_STOP:
+				break;
+			case APP_CMD_RELOAD:
+				break;
+		}
+	}
+
+shutdown:
+	/* Trigger other threads to stop */
+	logging_shutdown();
+
 	// pthread_join(gui_thread, NULL);
 	pthread_join(ipc_thread, NULL);
 	pthread_join(logging_thread, NULL);
-
-shutdown:
-	logging_shutdown();
 
 	return status;
 }

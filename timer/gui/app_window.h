@@ -1,9 +1,6 @@
 #pragma once
 
-// FIXME: [Penaz] [2026-03-26] This makes a lot of confusion, because
-// ^ #include "timer.h" is interpreted as relative to the GUI directory
-// ^ instead of the "include" root
-#include "../timer.h"
+#include "timer_old.h"
 #include "gui/welcome_box.h"
 #include "keybinds/keybinds.h"
 #include "opts.h"

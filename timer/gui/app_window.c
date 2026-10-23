@@ -16,7 +16,7 @@
 #include "plugins/plugin_loading.h"
 #include "runs.h"
 #include "settings/settings.h"
-#include "timer.h"
+#include "timer_old.h"
 
 #include <glib-object.h>
 #include <stdatomic.h>

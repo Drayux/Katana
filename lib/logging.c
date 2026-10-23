@@ -103,6 +103,34 @@ int logging_init(void)
 }
 
 /**
+ * Function to close the logger thread.
+ *
+ * This is needed because while we're closing, we might be waiting for
+ * the queue to fill up. If that's the case, we signal the thread to continue
+ * after setting logging_active to false.
+ */
+void logging_shutdown(void)
+{
+	LOG_DEBUG("Shutting down logger...")
+
+	atomic_store(&logging_active, 0);
+	pthread_cond_signal(&logQueue.cond);
+
+	logging_dumpall();
+	if (logQueue.logfile) {
+		fclose(logQueue.logfile);
+	}
+}
+
+void logging_dumpall(void) {
+	pthread_mutex_lock(&logQueue.lock);
+	while (logQueue.head != logQueue.tail) {
+		_pop_message();
+	}
+	pthread_mutex_unlock(&logQueue.lock);
+}
+
+/**
  * Underlying function to all the LOG_* macros
  *
  * Works as a producer.
@@ -167,32 +195,4 @@ void * loggingThread(void * arg)
 	}
 	LOG_WARN("Logging never initialized");
 	return NULL;
-}
-
-void logging_dumpall(void) {
-	pthread_mutex_lock(&logQueue.lock);
-	while (logQueue.head != logQueue.tail) {
-		_pop_message();
-	}
-	pthread_mutex_unlock(&logQueue.lock);
-}
-
-/**
- * Function to close the logger thread.
- *
- * This is needed because while we're closing, we might be waiting for
- * the queue to fill up. If that's the case, we signal the thread to continue
- * after setting logging_active to false.
- */
-void logging_shutdown(void)
-{
-	LOG_DEBUG("Shutting down logger thread...")
-
-	atomic_store(&logging_active, 0);
-	pthread_cond_signal(&logQueue.cond);
-
-	logging_dumpall();
-	if (logQueue.logfile) {
-		fclose(logQueue.logfile);
-	}
 }

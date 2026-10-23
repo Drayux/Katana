@@ -3,7 +3,7 @@
 #include "lasr/auto-splitter.h"
 #include "lua.h"
 #include "plugins/plugin_api.h"
-#include "timer.h"
+#include "timer_old.h"
 #include <stdint.h>
 
 extern ExternalLASRFunctionRegistry external_lasr_functions;

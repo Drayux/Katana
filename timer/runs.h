@@ -1,7 +1,7 @@
 #pragma once
 
 #include "gui/app_window.h"
-#include "timer.h"
+#include "timer_old.h"
 
 /**
  * MAX_ATTEMPTS_ARRAY_CAPACITTY ensures that at any given time

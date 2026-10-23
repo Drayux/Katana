@@ -2,7 +2,7 @@
 #include "gui/component/components.h"
 #include "logging.h"
 #include "lua.h"
-#include "timer.h"
+#include "timer_old.h"
 #include <stdlib.h>
 #include <string.h>
 

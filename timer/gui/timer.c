@@ -4,7 +4,7 @@
 #include "gui/game.h"
 #include "lasr/utils.h"
 #include "logging.h"
-#include "timer.h"
+#include "timer_old.h"
 
 /**
  * Stops the timer if it's running, otherwise resets it. If the timer is reset,

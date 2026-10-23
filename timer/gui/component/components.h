@@ -2,7 +2,7 @@
 
 #include "gui/components/component.h"
 #include "gui/utils.h"
-#include "timer.h"
+#include "timer_old.h"
 #include <gtk/gtk.h>
 #include <jansson.h>
 

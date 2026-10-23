@@ -82,7 +82,7 @@ sources = files(
     'gui.c',
     'main.c',
     'runs.c',
-    'timer.c',
+    'timer_old.c',
 
     # Settings
     'settings/definitions.c',
