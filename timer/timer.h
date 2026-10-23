@@ -16,7 +16,7 @@ typedef enum {
 // Load time takes precedence. AKA if both are "true" then the load delta will
 // be incremented and NOT the pause delta
 
-timer_state_t timer_init(void * arg)
+timer_state_t timer_init(void * arg);
 timer_state_t timer_split(timestamp_t ts, size_t idx);
 timer_state_t timer_split_next(timestamp_t ts);
 timer_state_t timer_pause(timestamp_t ts);

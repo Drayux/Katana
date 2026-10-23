@@ -728,7 +728,7 @@ gboolean ls_app_window_step(gpointer data)
 				atomic_store(&call_start, 0);
 			}
 			if (atomic_load(&call_split)) {
-				timer_split(win);
+				gui_timer_split(win);
 				atomic_store(&call_split, 0);
 			}
 			if (atomic_load(&toggle_loading)) {
@@ -736,7 +736,7 @@ gboolean ls_app_window_step(gpointer data)
 
 				if (win->timer->running) {
 					if (win->timer->loading) {
-						timer_pause(win);
+						gui_timer_pause(win);
 					}
 					else {
 						timer_unpause(win);

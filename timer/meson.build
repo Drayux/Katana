@@ -78,10 +78,12 @@ sources = files(
     'lasr/settings.c',
     'lasr/utils.c',
 
+    'app_cmd.c',
     'ipc_server.c',
     'gui.c',
     'main.c',
     'runs.c',
+    'timer.c',
     'timer_old.c',
 
     # Settings

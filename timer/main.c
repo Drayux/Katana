@@ -1,7 +1,9 @@
 #include "environment.h"
+#include "logging.h"
+
+#include "app_cmd.h"
 #include "gui.h"
 #include "ipc_server.h"
-#include "logging.h"
 
 #include "plugins/plugin_loading.h"
 #include "plugins/plugin_utils.h"
@@ -44,7 +46,7 @@ int main(int argc, char * argv[])
 	int status = 0; // OK
 	char const * envvar;
 	int sockfd;
-	app_cmd_t cmd;
+	app_cmd_t * cmd;
 
 	/* GTK handles its own thread, so we don't need this for now. When I come
 	 * back to revising the windowing logic, I will probably want it to take
@@ -135,21 +137,23 @@ int main(int argc, char * argv[])
 		 * be moving that logic to the main thread, here.
 		 */
 
-		switch (cmd) {
+		switch (cmd->op) {
 			default:
-				LOG_ERRORF("Unsupported main loop event: %d", (int) cmd);
+				LOG_ERRORF("Unsupported main loop event: %d", (int) cmd->op);
 				continue;
 
+			case APP_CMD_SCAN:
+				// TODO: try to resolve a command from the autosplitter
+				break;
 			case APP_CMD_START:
 				break;
 			case APP_CMD_STOP:
 				break;
-			case APP_CMD_RELOAD:
+			case APP_CMD_LOAD:
 				break;
 		}
 	}
 
-shutdown:
 	/* Trigger other threads to stop */
 	logging_shutdown();
 

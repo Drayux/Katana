@@ -95,7 +95,7 @@ int logging_init(void)
 
 	logQueue.logfile = fopen(data_path, "a");
 	if (!logQueue.logfile) {
-		perror("Failed to open log file");
+		perror("fopen fail");
 		return 1;
 	}
 

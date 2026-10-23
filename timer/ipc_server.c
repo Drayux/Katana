@@ -179,7 +179,7 @@ static void * ipc_server_thread(void * arg)
 
 			int client_fd = accept(server_fd, NULL, NULL);
 			if (client_fd < 0) {
-				perror("Failed to accept client connection");
+				perror("accept fail");
 				continue; // do not stop the server on accept errors
 			}
 

@@ -52,7 +52,7 @@ bool sendToLibreSplit(CTLCommand const cmd)
 
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sockfd == -1) {
-		perror("Failed to create socket");
+		perror("socket fail");
 		return false;
 	}
 

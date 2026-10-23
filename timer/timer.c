@@ -1,5 +1,7 @@
 #include "timer.h"
 
+#include <string.h>
+
 // Variable length struct so we only need one release
 // splits are 1-indexed -- the final split time will always be stored
 // at index 0, len excludes this.
@@ -31,7 +33,7 @@ typedef struct {
 	// > finished_count
 	// > etc.
 	size_t split_idx; // current split
-	split_list_t * splits;
+	timer_splits_t * splits;
 } timer_ctx_t;
 
 /* --- */
@@ -45,7 +47,7 @@ static timer_ctx_t timer_ctx = { 0 };
 static void timer_clear(void)
 {
 	NULL_FREE(timer_ctx.splits);
-	memset(&timer_ctx, 0, sizeof(timer_ctx_t);
+	memset(&timer_ctx, 0, sizeof(timer_ctx_t));
 }
 
 static timer_splits_t * timer_splits_create(size_t count)
@@ -122,7 +124,7 @@ timer_state_t timer_init(void * arg)
 
 timer_state_t timer_split(timestamp_t ts, size_t idx)
 {
-	split_t ref = NULL;
+	split_t * ref = NULL;
 	timestamp_t delta = 0; // for resuming from stop state
 
 	/* Validate inputs */
@@ -141,7 +143,7 @@ timer_state_t timer_split(timestamp_t ts, size_t idx)
 
 	switch (timer_ctx.state) {
 		case TIMER_STATE_READY:
-			LOG_INFOF("Timer started");
+			LOG_INFO("Timer started");
 			timer_ctx.state = TIMER_STATE_ACTIVE;
 			timer_ctx.start_ts = ts;
 			timer_ctx.state_ts = ts;

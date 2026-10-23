@@ -242,7 +242,7 @@ void timer_unsplit(LSAppWindow * win)
  *
  * @param win The LibreSplit window
  */
-void timer_split(LSAppWindow * win)
+void gui_timer_split(LSAppWindow * win)
 {
 	if (!win->timer)
 		return;
@@ -262,7 +262,7 @@ void timer_split(LSAppWindow * win)
  *
  * @param win The LibreSplit window
  */
-void timer_pause(LSAppWindow * win)
+void gui_timer_pause(LSAppWindow * win)
 {
 	if (!win->timer)
 		return;
@@ -306,7 +306,7 @@ void timer_unpause(LSAppWindow * win)
  *
  * @param win TheLibreSplit window
  */
-void timer_stop(LSAppWindow * win)
+void gui_timer_stop(LSAppWindow * win)
 {
 	if (!win->timer)
 		return;

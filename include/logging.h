@@ -83,12 +83,23 @@ void * loggingThread(void * arg);
 #define LOG_WARNF(fmt, ...)
 #endif
 
+// TODO: replacing this one with "ERROR"
+// but both are present right now to let me phase them out
 #if LOG_LEVEL <= LOG_LEVEL_ERROR
 #define LOG_ERR(message) LOG([ERROR], message);
 #define LOG_ERRF(fmt, ...) LOGF([ERROR], fmt, __VA_ARGS__);
 #else
 #define LOG_ERR(message)
 #define LOG_ERRF(fmt, ...)
+#endif
+///////
+
+#if LOG_LEVEL <= LOG_LEVEL_ERROR
+#define LOG_ERROR(message) LOG([ERROR], message);
+#define LOG_ERRORF(fmt, ...) LOGF([ERROR], fmt, __VA_ARGS__);
+#else
+#define LOG_ERROR(message)
+#define LOG_ERRORF(fmt, ...)
 #endif
 
 #if LOG_LEVEL <= LOG_LEVEL_FATAL

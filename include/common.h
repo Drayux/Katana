@@ -23,3 +23,5 @@
             free(ptr);                                      \
         }                                                   \
     } while (0)
+
+typedef unsigned char byte;

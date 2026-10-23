@@ -7,7 +7,7 @@
 // ns definitely excessive, but 64 bits gives plenty of head room and gives the
 // user more power to customize if they so please.
 // (plenty of room means some 540 years)
-typedef (unsigned long long) timestamp_t;
+typedef unsigned long long timestamp_t;
 #define TIMESTAMP_MAX ((timestamp_t) -1)
 
 
