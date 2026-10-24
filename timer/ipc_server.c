@@ -6,7 +6,6 @@
 #include <arpa/inet.h>
 #include <glib.h>
 #include <linux/limits.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +14,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-extern atomic_bool exit_requested;
+static int ipc_server_fd = -1;
 
 /**
  * Structure to pass command data to main thread
@@ -81,6 +80,7 @@ static void handle_ctl_command(CTLCommand command)
 /**
  * Command execution function that runs on the main thread
  */
+// TODO: Migrate this to create a command for the app_cmd.h API
 static gboolean execute_command_on_main_thread(gpointer data)
 {
 	CommandData * cmd_data = (CommandData *) data;
@@ -139,45 +139,51 @@ static int receive_message(int sockfd, CTLMessage ** out)
  *
  * @param arg The arguments to pass to the thread
  */
-static void * ipc_server_thread(void * arg)
+static void * ipc_server_main(void * arg)
 {
-	char * socket_path;
-	int server_fd;
+	// int ipc_server_fd; (static global)
+	int err;
 
 	prctl(PR_SET_NAME, "LS CTL Server", 0, 0, 0);
 
-	server_fd = ipc_create_listener();
-	if (server_fd < 0) {
+	ipc_server_fd = ipc_create_listener();
+	if (ipc_server_fd < 0) {
 		return NULL;
 	}
 
 	while (1) {
 		fd_set fds;
 		FD_ZERO(&fds);
-		FD_SET(server_fd, &fds);
+		FD_SET(ipc_server_fd, &fds);
 
-		struct timeval tv;
-		tv.tv_sec = 0;
-		tv.tv_usec = 50 * 1000; // 50ms
+		// struct timeval tv;
+		// tv.tv_sec = 0;
+		// tv.tv_usec = 50 * 1000; // 50ms
+		// err = select(ipc_server_fd + 1, &fds, NULL, NULL, &tv);
 
-		int ret = select(server_fd + 1, &fds, NULL, NULL, &tv);
-
-		if (ret < 0) {
-			perror("select failed");
-			continue;
-		}
-
-		if (ret == 0) { // Timeout
-			if (atomic_load(&exit_requested)) {
-				LOG_DEBUG("Exit requested, shutting down Server Thread");
-				break;
+		// TODO: Change this to a poll ( see man select(2) )
+		err = select(ipc_server_fd + 1, &fds, NULL, NULL, NULL);
+		if (err < 0) {
+			if (errno == EINTR) {
+				continue;
 			}
+			/* Shutdown issued by closing the socket */
+			// TODO: Check for a specifc errno to exit gracefully, else report
+			// what went wrong
+			LOG_ERROR("Select error (debugging output)");
+			break;
+		}
+		else if (err == 0) {
+			// We shouldn't get here, but leaving a log message during initial
+			// testing just in case
+			LOG_ERROR("Select timeout");
+			break;
 		}
 
 		// If we reach here, the listening socket is readable
-		if (FD_ISSET(server_fd, &fds)) {
+		if (FD_ISSET(ipc_server_fd, &fds)) {
 
-			int client_fd = accept(server_fd, NULL, NULL);
+			int client_fd = accept(ipc_server_fd, NULL, NULL);
 			if (client_fd < 0) {
 				perror("accept fail");
 				continue; // do not stop the server on accept errors
@@ -213,12 +219,6 @@ static void * ipc_server_thread(void * arg)
 	}
 
 	LOG_INFO("IPC server thread exiting");
-	close(server_fd);
-	if ((socket_path = ipc_get_socket_path())) {
-		unlink(socket_path);
-		free(socket_path);
-	}
-
 	return NULL;
 }
 
@@ -226,8 +226,22 @@ static void * ipc_server_thread(void * arg)
 void ipc_server_thread_start(pthread_t * thread)
 {
 	if (!thread) {
-		LOG_ERR("NULL arg passed");
+		LOG_ERR("IPC server thread is NULL");
 		return;
 	}
-	pthread_create(thread, NULL, &ipc_server_thread, NULL);
+	pthread_create(thread, NULL, &ipc_server_main, NULL);
+}
+
+void ipc_server_thread_shutdown(void)
+{
+	char * socket_path;
+	if (ipc_server_fd > 0) {
+		// 0 (stdin) is a valid fd but never the ipc server
+		close(ipc_server_fd);
+		ipc_server_fd = -1;
+	}
+	if ((socket_path = ipc_get_socket_path())) {
+		unlink(socket_path);
+		free(socket_path);
+	}
 }

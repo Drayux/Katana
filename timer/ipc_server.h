@@ -7,3 +7,4 @@
 // the result of that.
 
 void ipc_server_thread_start(pthread_t * thread);
+void ipc_server_thread_shutdown(void);

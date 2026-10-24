@@ -113,7 +113,7 @@ void logging_shutdown(void)
 {
 	LOG_DEBUG("Shutting down logger...")
 
-	atomic_store(&logging_active, 0);
+	atomic_store(&logging_active, false);
 	pthread_cond_signal(&logQueue.cond);
 
 	logging_dumpall();
@@ -183,9 +183,8 @@ void * loggingThread(void * arg)
 			// unlocks the mutex, waits for a signal
 			pthread_cond_wait(&logQueue.cond, &logQueue.lock);
 			if (!atomic_load(&logging_active)) {
-				// TODO: probably don't need this??
-				LOG_INFO("Logging thread exiting");
 				pthread_mutex_unlock(&logQueue.lock);
+				LOG_INFO("Logging thread exiting");
 				return NULL;
 			}
 		}

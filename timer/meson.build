@@ -80,7 +80,7 @@ sources = files(
 
     'app_cmd.c',
     'ipc_server.c',
-    'gui.c',
+    'ui.c',
     'main.c',
     'runs.c',
     'timer.c',

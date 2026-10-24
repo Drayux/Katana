@@ -2,8 +2,8 @@
 #include "logging.h"
 
 #include "app_cmd.h"
-#include "gui.h"
 #include "ipc_server.h"
+#include "ui.h"
 
 #include "plugins/plugin_loading.h"
 #include "plugins/plugin_utils.h"
@@ -53,6 +53,7 @@ int main(int argc, char * argv[])
 	 * as similar a form as possible, so I've left this stubbed in comments. */
 	// pthread_t gui_thread;
 
+	pthread_t ui_thread;
 	pthread_t ipc_thread;
 	pthread_t logging_thread;
 
@@ -97,9 +98,10 @@ int main(int argc, char * argv[])
 		return 1;
 	}
 	LOG_DEBUG("Init IPC server thread");
-	ipc_server_thread_start(&ipc_thread);
+	// ipc_server_thread_start(&ipc_thread);
 
 	/* Spawn a thread to handle asyncronous log output */
+	// TODO: Migrate this to the same format as ipc_server_thread_start
 	LOG_DEBUG("Init logging thread");
 	pthread_create(&logging_thread, NULL, &loggingThread, NULL);
 
@@ -113,7 +115,8 @@ int main(int argc, char * argv[])
 	 * TUI will be the fallback */
 	LOG_DEBUG("Init GUI thread");
 	// gui_thread_start(&gui_thread);
-	(void) gui_start();
+	// (void) ui_start();
+	ui_thread_start(&ui_thread);
 
 	// pthread_t t1; // Auto-splitter thread
 	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
@@ -145,20 +148,53 @@ int main(int argc, char * argv[])
 			case APP_CMD_SCAN:
 				// TODO: try to resolve a command from the autosplitter
 				break;
-			case APP_CMD_START:
+			case APP_CMD_SPLIT:
+				// printf("TIMER SPLIT LET's GOOOO\n");
+				LOG_INFO("TIMER SPLIT LET's GOOOO");
 				break;
 			case APP_CMD_STOP:
 				break;
 			case APP_CMD_LOAD:
 				break;
+
+			case APP_CMD_QUIT:
+				goto shutdown;
 		}
+
+
+
+		// FOR NEXT TIME!
+		// I am fighting my threading a little bit:
+		//  - ui_notify() doesn't want to work more than once. Perhaps I have to
+		//    reset the pipefd after checking it like you see with select?
+		//  - I still can't shutdown properly. not sure what is getting deadlocked
+		//    (note that the ipc server currently commented out to test this)
+		//  - The better form of the UI would consume one character immediately
+		//    and hide the prompt
+		//  - I didn't think through what I want app_cmd_poll to return.
+		//    Quit works fine! But the command object is non-null and would need
+		//    extra love to be null instead when non-null works just fine.
+		//    I don't need multiple pathways for exiting like this, but neither
+		//    way is wrong, either?? (Probably won't answer this right away.)
+
+
+
+		// TODO: Maybe a temporary interface, shows the TUI prompt for now
+		ui_notify();
 	}
 
+shutdown:
+	LOG_DEBUG("Main shutdown started");
+
+	// TODO: Close the FDs for the app_cmd pipe
+
 	/* Trigger other threads to stop */
+	ui_thread_shutdown();
+	// ipc_server_thread_shutdown();
 	logging_shutdown();
 
-	// pthread_join(gui_thread, NULL);
-	pthread_join(ipc_thread, NULL);
+	// pthread_join(ipc_thread, NULL);
+	pthread_join(ui_thread, NULL);
 	pthread_join(logging_thread, NULL);
 
 	return status;

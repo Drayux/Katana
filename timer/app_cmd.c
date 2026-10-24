@@ -147,6 +147,8 @@ app_cmd_t * app_cmd_poll(void) {
 	}
 
 	/* Waits for something to read */
+	// TODO consider using ppoll here to support a high refresh rate
+	// autosplitter setting
 	while((err = poll(&pfd, 1, -1))) {
 		if (err == -1) {
 			if (errno == EINTR) {
