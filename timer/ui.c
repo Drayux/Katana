@@ -38,7 +38,7 @@ static int run_terminal_ui(void)
 {
 	char buf[16];
 	size_t len = 0;
-	int err;
+	int ready;
 
 	usleep(1000); // wait a bit before showing anything (lazy fix for now)
 	fputs("KATANA > ", stdout);
@@ -56,8 +56,8 @@ static int run_terminal_ui(void)
 			},
 		};
 
-		err = poll(fds, 2, -1);
-		if (err < 0) {
+		ready = poll(fds, 2, -1);
+		if (ready < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
@@ -162,6 +162,8 @@ static int run_terminal_ui(void)
 
 static void * ui_main(void * arg)
 {
+	logging_add_reporter("ui");
+
 	(void) run_terminal_ui();
 	// (void) run_gtk_ui();
 

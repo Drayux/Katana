@@ -136,7 +136,7 @@ app_cmd_t * app_cmd_poll(void) {
 		.fd = event.readfd,
 		.events = POLLIN
 	};
-	int err;
+	int ready;
 	ssize_t len;
 
 	if (!event.initialized) {
@@ -149,8 +149,8 @@ app_cmd_t * app_cmd_poll(void) {
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
 	// autosplitter setting
-	while((err = poll(&pfd, 1, -1))) {
-		if (err == -1) {
+	while((ready = poll(&pfd, 1, -1))) {
+		if (ready == -1) {
 			if (errno == EINTR) {
 				continue;
 			}

@@ -53,7 +53,7 @@ int main(int argc, char * argv[])
 	 * as similar a form as possible, so I've left this stubbed in comments. */
 	// pthread_t gui_thread;
 
-	// pthread_t ui_thread;
+	pthread_t ui_thread;
 	// pthread_t ipc_thread;
 
 	logging_init();
@@ -97,20 +97,19 @@ int main(int argc, char * argv[])
 
 	/* Spawn a thread to handle asyncronous log output */
 	LOG_DEBUG("Init logging thread");
-	return 0;
-	// logging_thread_start();
+	logging_thread_start();
 
 	/* Prepare and register selected plugins */
-	init_external_lasr_functions();
-	init_timer_registries();
-	load_plugins();
+	// init_external_lasr_functions();
+	// init_timer_registries();
+	// load_plugins();
 
 	/* Spawn the GUI thread
 	 * TODO: Windowing logic eventually be moved into a default plugin, and a
 	 * TUI will be the fallback */
 	LOG_DEBUG("Init GUI thread");
 	// gui_thread_start(&gui_thread);
-	// ui_thread_start(&ui_thread);
+	ui_thread_start(&ui_thread);
 
 	// pthread_t t1; // Auto-splitter thread
 	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
@@ -183,12 +182,14 @@ shutdown:
 	// TODO: Close the FDs for the app_cmd pipe
 
 	/* Trigger other threads to stop */
-	// ui_thread_shutdown();
+	ui_thread_shutdown();
 	// ipc_server_thread_shutdown();
-	// logging_shutdown();
 
 	// pthread_join(ipc_thread, NULL);
-	// pthread_join(ui_thread, NULL);
+	pthread_join(ui_thread, NULL);
+
+	printf("logger_shutdown\n");
+	logging_shutdown();
 
 	return status;
 }

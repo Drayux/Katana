@@ -16,7 +16,7 @@
     do {                                                    \
         if ((ptr) == NULL) {                                \
             LOG_ERRORF("alloc: no memory for `%s`", #ptr);  \
-            goto (label);                                   \
+            goto label;                                     \
         }                                                   \
     } while (0)
 

@@ -23,7 +23,7 @@
 int logging_init(void);
 void logging_shutdown(void);
 int logging_thread_start(void);
-void logging_thread_stop(void); // optional step: keeps log file open
+int logging_thread_stop(void); // optional step: keeps log file open
 int logging_add_reporter(char const * friendly_name);
 void logMessage(char const * fmt, ...);
 
@@ -42,7 +42,7 @@ void logMessage(char const * fmt, ...);
 #define LOG__STR(x) LOG__XSTR(x)
 
 #define LOG_STRING(file, line, level, message)                                 \
-	file ": " line " | " level " - " message "\n"
+	file ":" line " | " level " " message "\n"
 
 #define LOG(T, message)                                                        \
 	{                                                                          \
