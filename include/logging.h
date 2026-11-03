@@ -16,20 +16,16 @@
 
 #pragma once
 
-#include <pthread.h>
-#include <stdatomic.h>
+#include "common.h"
 
-#define LOG_QUEUE_SIZE 100
-#define LOG_STR_LEN 512
-
-extern atomic_bool exit_requested;
+#define LOG_LINE_LEN 256
 
 int logging_init(void);
 void logging_shutdown(void);
-void logging_dumpall(void);
-
+int logging_thread_start(void);
+void logging_thread_stop(void); // optional step: keeps log file open
+int logging_add_reporter(char const * friendly_name);
 void logMessage(char const * fmt, ...);
-void * loggingThread(void * arg);
 
 #define LOG_LEVEL_DEBUG 0
 #define LOG_LEVEL_INFO  1

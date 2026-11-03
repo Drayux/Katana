@@ -53,9 +53,8 @@ int main(int argc, char * argv[])
 	 * as similar a form as possible, so I've left this stubbed in comments. */
 	// pthread_t gui_thread;
 
-	pthread_t ui_thread;
-	pthread_t ipc_thread;
-	pthread_t logging_thread;
+	// pthread_t ui_thread;
+	// pthread_t ipc_thread;
 
 	logging_init();
 	LOG_INFOF("Welcome to Katana timer, version %s", APP_VERSION);
@@ -69,8 +68,6 @@ int main(int argc, char * argv[])
 		envvar = getenv("BYPASS_ROOT_PROTECTION");
 		if (!envvar || strcmp(envvar, "1")) {
 			LOG_FATAL("Bypass root protection not enabled");
-			// Threads not yet started
-			logging_dumpall();
 			return 1;
 		}
 	}
@@ -93,17 +90,15 @@ int main(int argc, char * argv[])
 			"Katana is already open, and more than one instance introduces "
 			"a lot of bugs that you don't want to deal with. Exiting."
 		);
-		// Threads not yet started
-		logging_dumpall();
 		return 1;
 	}
 	LOG_DEBUG("Init IPC server thread");
 	// ipc_server_thread_start(&ipc_thread);
 
 	/* Spawn a thread to handle asyncronous log output */
-	// TODO: Migrate this to the same format as ipc_server_thread_start
 	LOG_DEBUG("Init logging thread");
-	pthread_create(&logging_thread, NULL, &loggingThread, NULL);
+	return 0;
+	// logging_thread_start();
 
 	/* Prepare and register selected plugins */
 	init_external_lasr_functions();
@@ -115,8 +110,7 @@ int main(int argc, char * argv[])
 	 * TUI will be the fallback */
 	LOG_DEBUG("Init GUI thread");
 	// gui_thread_start(&gui_thread);
-	// (void) ui_start();
-	ui_thread_start(&ui_thread);
+	// ui_thread_start(&ui_thread);
 
 	// pthread_t t1; // Auto-splitter thread
 	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
@@ -189,13 +183,12 @@ shutdown:
 	// TODO: Close the FDs for the app_cmd pipe
 
 	/* Trigger other threads to stop */
-	ui_thread_shutdown();
+	// ui_thread_shutdown();
 	// ipc_server_thread_shutdown();
-	logging_shutdown();
+	// logging_shutdown();
 
 	// pthread_join(ipc_thread, NULL);
-	pthread_join(ui_thread, NULL);
-	pthread_join(logging_thread, NULL);
+	// pthread_join(ui_thread, NULL);
 
 	return status;
 }

@@ -17,6 +17,8 @@
 #include <stdatomic.h>
 #include <sys/stat.h>
 
+extern atomic_bool exit_requested;
+
 /**
  * Compares the current timer and the saved one to see
  * if the current one is better for the game's comparison method.
