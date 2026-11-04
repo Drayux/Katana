@@ -130,7 +130,12 @@ ssize_t app_cmd_send(app_cmd_t * send_cmd, bool try_again)
 	return 0;
 }
 
-// return value is valid only until app_cmd_poll is called again
+/* TODO: I didn't think through what I want app_cmd_poll to return. Quit works
+ * fine! But the command object is non-null and would need extra love to be
+ * null instead when non-null works just fine. I don't need multiple pathways
+ * for exiting like this, but neither way is wrong, either??
+ * (Probably won't answer this right away.) */
+/* NOTE: return value ptr is valid only until app_cmd_poll is called again */
 app_cmd_t * app_cmd_poll(void) {
 	struct pollfd pfd = {
 		.fd = event.readfd,

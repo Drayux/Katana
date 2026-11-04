@@ -4,16 +4,19 @@
 #include "gui/app_window.h"
 #include "gui/timer.h"
 
+#include <fcntl.h>
 #include <gtk/gtk.h>
 #include <poll.h>
 #include <sched.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 static LSApp * g_app = NULL;
-static int wakeup[2] = { -1, -1 };
+// static int wakeup[2] = { -1, -1 };
+static int notify_fd = 0;
 static atomic_bool shutdown_requested = false;
 
 static int run_gtk_ui(void)
@@ -24,7 +27,7 @@ static int run_gtk_ui(void)
 
 	/* Blocking call */
 	status = g_application_run(G_APPLICATION(g_app), 0, NULL);
-	/* *** */
+	/* --- */
 
 	g_clear_object(&g_app);
 	return status;
@@ -36,6 +39,9 @@ static int run_gtk_ui(void)
  * This mode exists primarily for testing purposes. */
 static int run_terminal_ui(void)
 {
+	// TODO: A better form of the UI would consume one character immediately
+	// and hide the prompt
+
 	char buf[16];
 	size_t len = 0;
 	int ready;
@@ -47,12 +53,13 @@ static int run_terminal_ui(void)
 	while (true) {
 		struct pollfd fds[2] = {
 			{
-				.fd = STDIN_FILENO,
-				.events = POLLIN | POLLHUP | POLLERR
+				// .fd = wakeup[0],
+				.fd = notify_fd,
+				.events = POLLIN
 			},
 			{
-				.fd = wakeup[0],
-				.events = POLLIN
+				.fd = STDIN_FILENO,
+				.events = POLLIN | POLLHUP | POLLERR
 			},
 		};
 
@@ -66,8 +73,8 @@ static int run_terminal_ui(void)
 		}
 
 		/* Wakeup not triggered by stdin */
-		if (fds[1].revents & POLLIN) {
-			printf("wake notification\n");
+		if (fds[0].revents & POLLIN) {
+			CLEAR_EVENT(fds[0].fd);
 			if (atomic_load(&shutdown_requested)) {
 				break;
 			}
@@ -78,7 +85,7 @@ static int run_terminal_ui(void)
 			}
 		}
 
-		if (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) {
+		if (fds[1].revents & (POLLIN | POLLHUP | POLLERR)) {
 			ssize_t n = read(STDIN_FILENO, buf + len, sizeof(buf) - len);
 			if (n < 0) {
 				if (errno == EINTR || errno == EAGAIN) {
@@ -149,12 +156,9 @@ static int run_terminal_ui(void)
 	// Only relevant if we break ourself
 	atomic_store(&shutdown_requested, true);
 
-	// Shutdown the wakeup pipe
-	if (wakeup[0] > 2) {
-		close(wakeup[0]);
-	}
-	if (wakeup[1] > 2) {
-		close(wakeup[1]);
+	// Shutdown the wake event fd
+	if (notify_fd > 2) {
+		close(notify_fd);
 	}
 
 	return 0;
@@ -162,8 +166,15 @@ static int run_terminal_ui(void)
 
 static void * ui_main(void * arg)
 {
+    if ((notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC)) < 0) {
+		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
+		return NULL;
+	}
+
 	logging_add_reporter("ui");
 
+	/* TODO: Windowing logic eventually be moved into a default plugin, and a
+	 * TUI will be the fallback */
 	(void) run_terminal_ui();
 	// (void) run_gtk_ui();
 
@@ -177,17 +188,21 @@ static void * ui_main(void * arg)
 void ui_notify(void)
 {
 	// TODO: Should I assert the state of the FD before trying to write?
-	char x = 'x';
-	(void) !write(wakeup[1], &x, 1);
+	// char const x = 'x';
+	// (void) !write(wakeup[1], &x, 1);
+
+	// unsigned long long eggs_and_bacon = 1; // arbitrary
+	// (void) !write(notify_fd, &eggs_and_bacon, 8);
+	SET_EVENT(notify_fd);
 }
 
-void ui_thread_start(pthread_t * thread)
+int ui_thread_start(pthread_t * thread)
 {
 	if (!thread) {
 		LOG_ERR("UI thread is NULL");
-		return;
+		return -1;
 	}
-	pthread_create(thread, NULL, &ui_main, NULL);
+	return pthread_create(thread, NULL, &ui_main, NULL);
 }
 
 void ui_thread_shutdown(void)

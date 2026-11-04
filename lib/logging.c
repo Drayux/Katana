@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <threads.h>
 #include <time.h>
@@ -125,8 +126,6 @@ static void * log_consumer_loop(void * arg)
 	size_t fds_len_new; /* for realloc, if needed */
 	struct pollfd * fds_new;
 
-	int notify_pipe[2] = { 0 };
-
 	int ready;
 	int fd_idx;
 	char msg[LOG_LINE_LEN];
@@ -138,19 +137,17 @@ static void * log_consumer_loop(void * arg)
 	/* Store what went wrong if we need to shut down early */
 	char const * err_msg = NULL;
 
-	// TODO: Placeholder for adding the logging thread as a log reporter
-	// (I might not want this, see consumer_exit.)
-
 	pthread_mutex_lock(&shared_ctx.lock);
 
 	/* set up a notify fd pipe -- always the first fd in the list */
-    if (pipe2(notify_pipe, O_NONBLOCK | O_CLOEXEC)) {
-		LOG_ERROR("pipe fail");
+    if ((shared_ctx.notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC)) < 0) {
+		LOG_ERROR("eventfd fail: could not create logger thread wake event fd");
 		goto consumer_exit;
 	}
-	shared_ctx.notify_fd = notify_pipe[1];
-	fds->fd = notify_pipe[0];
+	fds->fd = shared_ctx.notify_fd;
 	fds->events = POLLIN;
+
+	logging_add_reporter("logger");
 
 	while (1) {
 		memset(fds + 1, 0, (fds_len - 1) * sizeof(struct pollfd));
@@ -199,6 +196,9 @@ static void * log_consumer_loop(void * arg)
 			goto consumer_exit;
 		}
 
+		/* TODO: I'm not sure if this dumps everything or not. While that many
+		 * messages piling up is a concern of its own, if it does not, said
+		 * piled messages would be dropped */
 		for (fd_idx = 1; fd_idx < fd_count; ++fd_idx) {
 			if (fds[fd_idx].revents != 0) {
 				if (!(fds[fd_idx].revents & POLLIN)) {
@@ -222,6 +222,7 @@ static void * log_consumer_loop(void * arg)
 
 		if (fds[0].revents & POLLIN) {
 			/* wake requested */
+			CLEAR_EVENT(fds[0].fd);
 			if (!atomic_load(&shared_ctx.active)) {
 				goto consumer_exit;
 			}
@@ -240,13 +241,10 @@ consumer_exit:
 	LOG_INFO("Logging thread exiting");
 	NULL_FREE(fds);
 
+	if (shared_ctx.notify_fd > 2) {
+		close(shared_ctx.notify_fd);
+	}
 	shared_ctx.notify_fd = 0; /* unset the field, we know it's never stdin */
-	if (notify_pipe[0] > 2) {
-		close(notify_pipe[0]);
-	}
-	if (notify_pipe[1] > 2) {
-		close(notify_pipe[1]);
-	}
 
 	pthread_mutex_unlock(&shared_ctx.lock);
 	return NULL;
@@ -340,8 +338,9 @@ void logging_shutdown(void)
 	logfile_ref = shared_ctx.logfile;
 	shared_ctx.logfile = NULL;
 	pthread_mutex_unlock(&shared_ctx.lock);
-
-	// TODO: Surely the mutex needed to be cleaned up??
+	// TODO: If it's safe to assume no threads are calling LOG_x by this point,
+	// perhaps I do not need to lock this above at all.
+	pthread_mutex_destroy(&shared_ctx.lock);
 
 	/* Any stray thread will only emit to stderr, now.
 	 * This *shouldn't* happen, but it is not undefined behavior. */
@@ -407,25 +406,11 @@ int logging_thread_stop(void)
 
 void logging_thread_notify(void)
 {
-	char const x = 'x';
-
 	/* mutex guarantees valid notify fd, it will not be closed if we hold it */
 	pthread_mutex_lock(&shared_ctx.lock);
 	if (shared_ctx.notify_fd > 0) {
-		(void) !write(shared_ctx.notify_fd, &x, 1);
+		SET_EVENT(shared_ctx.notify_fd);
 	}
-
-	// TODO: Do I want to warn for this? Right now I'm only using this in a way
-	// where failure is no cause for concern. 
-	// else {
-		/* NOTE/TODO: If the thread is running and the reporter is valid, this
-		 * will technically wake the logger thread. Else it'll just recursive
-		 * lock and emit directly.
-		 * While I think that this is fine, I wanted to make note of it in case
-		 * something goes wrong, as I'm not 100% sure of that conclusion. */
-		// LOG_ERROR("notify_fd invalid: Could not wake logger thread");
-	// }
-
 	pthread_mutex_unlock(&shared_ctx.lock);
 }
 
@@ -441,10 +426,6 @@ int logging_add_reporter(char const * friendly_name)
 	int pipe_fds[2];
 
 	/* search to be sure that the reporter does not already exist */
-	// TODO: Possible design conflict-of-interest: allowing the thread to have
-	// a deferred start means that we need to able to add a fully-functional
-	// reporter with the chance we never use its pipe ever. Not necessarily
-	// wrong, but is it ideal??
 	pthread_mutex_lock(&shared_ctx.lock);
 	ref = _find_reporter(id);
 	if (!ref->tail) {
@@ -497,8 +478,9 @@ void __log_message(char const * fmt, ...)
 	size_t msg_len;
 	ssize_t send_len;
 
-	char thread[64]; // TODO: arbitrary
+	char thread[LOG_THREAD_LEN];
 	size_t thread_len;
+	size_t max_thread_len; // only calculated if needed
 
 	time_t current_time = time(NULL);
 	struct tm * ts = localtime(&current_time);
@@ -509,8 +491,10 @@ void __log_message(char const * fmt, ...)
 	if (local_reporter && local_reporter->name) {
 		thread_len = snprintf(thread, sizeof(thread), "<%s> ", local_reporter->name);
 		if (thread_len >= sizeof(thread)) {
-			// TODO: I should have a better way to handle a thread name being too long
-			strcpy(thread, "< ... > ");
+			max_thread_len = sizeof(thread) - strlen("<..> ") - 1;
+			thread[0] = '<';
+			strncpy(thread + 1, local_reporter->name, max_thread_len);
+			strcpy(thread + 1 + max_thread_len, "..> ");
 		}
 		strncpy(msg + msg_len, thread, sizeof(msg) - msg_len - 1);
 		msg_len = strlen(msg);

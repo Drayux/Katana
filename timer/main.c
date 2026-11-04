@@ -48,13 +48,8 @@ int main(int argc, char * argv[])
 	int sockfd;
 	app_cmd_t * cmd;
 
-	/* GTK handles its own thread, so we don't need this for now. When I come
-	 * back to revising the windowing logic, I will probably want it to take
-	 * as similar a form as possible, so I've left this stubbed in comments. */
-	// pthread_t gui_thread;
-
 	pthread_t ui_thread;
-	// pthread_t ipc_thread;
+	pthread_t ipc_thread;
 
 	logging_init();
 	LOG_INFOF("Welcome to Katana timer, version %s", APP_VERSION);
@@ -76,14 +71,13 @@ int main(int argc, char * argv[])
 	// TODO: Options for CLI stuff (help, plugin exclusion, etc.)
 
 	/* Validate other environment conditions */
-	// TODO: Depending on what CLI gets implemented, this could be
+	// ^^ TODO: Depending on what CLI options are implemented, this could be
 	// conditionally bypassed
 	check_directories();
 
 	/* Check for IPC socket
-	 * If present, it is likely that an instance is already open */
-	// TODO: As with most things I write, this appears to work, but it could
-	// use more testing.
+	 * If present, assume that an instance is already open */
+	// TODO: Appears to work; could use more testing.
 	if ((sockfd = ipc_connect()) >= 0) {
 		close(sockfd);
 		LOG_FATAL(
@@ -92,30 +86,26 @@ int main(int argc, char * argv[])
 		);
 		return 1;
 	}
-	LOG_DEBUG("Init IPC server thread");
-	// ipc_server_thread_start(&ipc_thread);
+	LOG_DEBUG("Start IPC server thread");
+	(void) ipc_server_thread_start(&ipc_thread);
 
 	/* Spawn a thread to handle asyncronous log output */
-	LOG_DEBUG("Init logging thread");
-	logging_thread_start();
+	LOG_DEBUG("Start logging thread");
+	(void) logging_thread_start();
 
 	/* Prepare and register selected plugins */
 	// init_external_lasr_functions();
 	// init_timer_registries();
 	// load_plugins();
-
-	/* Spawn the GUI thread
-	 * TODO: Windowing logic eventually be moved into a default plugin, and a
-	 * TUI will be the fallback */
-	LOG_DEBUG("Init GUI thread");
-	// gui_thread_start(&gui_thread);
-	ui_thread_start(&ui_thread);
-
 	// pthread_t t1; // Auto-splitter thread
 	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
 	// pthread_join(t1, NULL);
 
-	LOG_INFO("Starting application loop");
+	/* Spawn the GUI thread */
+	LOG_DEBUG("Start GUI thread");
+	(void) ui_thread_start(&ui_thread);
+
+	LOG_INFO("Enter main application loop");
 	while ((cmd = app_cmd_poll())) {
 
 		/* This portion is still a very rough WIP.
@@ -153,39 +143,22 @@ int main(int argc, char * argv[])
 				goto shutdown;
 		}
 
-
-
-		// FOR NEXT TIME!
-		// I am fighting my threading a little bit:
-		//  - ui_notify() doesn't want to work more than once. Perhaps I have to
-		//    reset the pipefd after checking it like you see with select?
-		//  - I still can't shutdown properly. not sure what is getting deadlocked
-		//    (note that the ipc server currently commented out to test this)
-		//  - The better form of the UI would consume one character immediately
-		//    and hide the prompt
-		//  - I didn't think through what I want app_cmd_poll to return.
-		//    Quit works fine! But the command object is non-null and would need
-		//    extra love to be null instead when non-null works just fine.
-		//    I don't need multiple pathways for exiting like this, but neither
-		//    way is wrong, either?? (Probably won't answer this right away.)
-
-
-
 		// TODO: Maybe a temporary interface, shows the TUI prompt for now
+		// ALSO: It doesn't want to "work" more than once??
 		ui_notify();
 	}
 
 shutdown:
-	LOG_DEBUG("Main shutdown started");
+	LOG_DEBUG("Leave main application loop");
 
 	// TODO: Close the FDs for the app_cmd pipe
 
 	/* Trigger other threads to stop */
+	ipc_server_thread_shutdown();
 	ui_thread_shutdown();
-	// ipc_server_thread_shutdown();
 
-	// pthread_join(ipc_thread, NULL);
-	// pthread_join(ui_thread, NULL);
+	pthread_join(ui_thread, NULL);
+	pthread_join(ipc_thread, NULL);
 
 	logging_shutdown();
 
