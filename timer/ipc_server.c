@@ -4,17 +4,20 @@
 #include "logging.h"
 
 #include <arpa/inet.h>
-#include <glib.h>
+#include <fcntl.h>
 #include <linux/limits.h>
+#include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
-static int ipc_server_fd = -1;
+static int notify_fd = 0;
 
 /**
  * Structure to pass command data to main thread
@@ -77,21 +80,6 @@ static void handle_ctl_command(CTLCommand command)
 	}
 }
 
-/**
- * Command execution function that runs on the main thread
- */
-// TODO: Migrate this to create a command for the app_cmd.h API
-static gboolean execute_command_on_main_thread(gpointer data)
-{
-	CommandData * cmd_data = (CommandData *) data;
-
-	// Call the main.c function to handle the command
-	handle_ctl_command(cmd_data->command);
-
-	g_free(cmd_data);
-	return FALSE; // Remove from idle queue
-}
-
 // Forward declarations for command handlers
 
 /**
@@ -141,48 +129,53 @@ static int receive_message(int sockfd, CTLMessage ** out)
  */
 static void * ipc_server_main(void * arg)
 {
-	// int ipc_server_fd; (static global)
-	int err;
+	int ipc_server_fd;
+	int ready;
 
 	prctl(PR_SET_NAME, "LS CTL Server", 0, 0, 0);
 
-	ipc_server_fd = ipc_create_listener();
-	if (ipc_server_fd < 0) {
+	notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
+    if (notify_fd < 0) {
+		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
 		return NULL;
 	}
 
+	ipc_server_fd = ipc_create_listener();
+	if (ipc_server_fd < 0) {
+		close(notify_fd);
+		return NULL;
+	}
+
+	struct pollfd fds[2] = {
+		{
+			.fd = notify_fd,
+			.events = POLLIN
+		},
+		{
+			.fd = ipc_server_fd,
+			.events = POLLIN | POLLHUP | POLLERR
+		},
+	};
+
 	while (1) {
-		fd_set fds;
-		FD_ZERO(&fds);
-		FD_SET(ipc_server_fd, &fds);
-
-		// struct timeval tv;
-		// tv.tv_sec = 0;
-		// tv.tv_usec = 50 * 1000; // 50ms
-		// err = select(ipc_server_fd + 1, &fds, NULL, NULL, &tv);
-
-		// TODO: Change this to a poll ( see man select(2) )
-		err = select(ipc_server_fd + 1, &fds, NULL, NULL, NULL);
-		if (err < 0) {
+		ready = poll(fds, 2, -1);
+		if (ready < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
-			/* Shutdown issued by closing the socket */
-			// TODO: Check for a specifc errno to exit gracefully, else report
-			// what went wrong
-			LOG_ERROR("Select error (debugging output)");
-			break;
-		}
-		else if (err == 0) {
-			// We shouldn't get here, but leaving a log message during initial
-			// testing just in case
-			LOG_ERROR("Select timeout");
+			LOG_ERROR("poll error");
+			perror("poll");
 			break;
 		}
 
-		// If we reach here, the listening socket is readable
-		if (FD_ISSET(ipc_server_fd, &fds)) {
+		/* Unlike logger thread, prioritize shutdown first */
+		if (fds[0].revents & POLLIN) {
+			/* IPC thread only notified for shutdown */
+			CLEAR_EVENT(fds[0].fd);
+			break;
+		}
 
+		if (fds[1].revents & POLLIN) {
 			int client_fd = accept(ipc_server_fd, NULL, NULL);
 			if (client_fd < 0) {
 				perror("accept fail");
@@ -194,6 +187,8 @@ static void * ipc_server_main(void * arg)
 
 			if (result == 0) {
 				if (msg->length == sizeof(CTLCommand)) {
+					// TODO: I think I wanted to clean up this a bit to match
+					// more closely with that of app_cmd.
 					// CTLCommand command = *(CTLCommand *) msg->message;
 					// CommandData * cmd_data = g_malloc(sizeof(CommandData));
 					// cmd_data->command = command;
@@ -201,24 +196,34 @@ static void * ipc_server_main(void * arg)
 					// Queue command execution on main thread
 					// g_idle_add(execute_command_on_main_thread, cmd_data);
 
-					printf("Received data: %d\n", *((int *) msg->message));
+					LOG_DEBUGF("Received data: %d", *((int *) msg->message));
 				}
 				else {
-					printf("Invalid message length: %u (expected %zu)\n",
+					LOG_WARNF("Invalid message length: %u (expected %zu)",
 						msg->length, sizeof(CTLCommand));
 				}
-
 				free(msg);
 			}
 			else {
-				printf("Client closed without sending a full message.\n");
+				LOG_DEBUG("IPC client closed before message completed");
 			}
 
 			close(client_fd);
 		}
+		else if (fds[1].revents & (POLLHUP | POLLERR)) {
+			LOG_ERROR("IPC socket failure (TODO not sure what all could happen here)");
+			break;
+		}
 	}
 
 	LOG_INFO("IPC server thread exiting");
+    if (notify_fd > 2) {
+		close(notify_fd);
+	}
+    if (ipc_server_fd > 2) {
+		close(ipc_server_fd);
+	}
+
 	return NULL;
 }
 
@@ -235,11 +240,9 @@ void ipc_server_thread_start(pthread_t * thread)
 void ipc_server_thread_shutdown(void)
 {
 	char * socket_path;
-	if (ipc_server_fd > 0) {
-		// 0 (stdin) is a valid fd but never the ipc server
-		close(ipc_server_fd);
-		ipc_server_fd = -1;
-	}
+
+	SET_EVENT(notify_fd);
+
 	if ((socket_path = ipc_get_socket_path())) {
 		unlink(socket_path);
 		free(socket_path);

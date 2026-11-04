@@ -137,10 +137,6 @@ ssize_t app_cmd_send(app_cmd_t * send_cmd, bool try_again)
  * (Probably won't answer this right away.) */
 /* NOTE: return value ptr is valid only until app_cmd_poll is called again */
 app_cmd_t * app_cmd_poll(void) {
-	struct pollfd pfd = {
-		.fd = event.readfd,
-		.events = POLLIN
-	};
 	int ready;
 	ssize_t len;
 
@@ -151,11 +147,16 @@ app_cmd_t * app_cmd_poll(void) {
 		}
 	}
 
+	struct pollfd pfd = {
+		.fd = event.readfd,
+		.events = POLLIN | POLLERR | POLLNVAL
+	};
+
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
 	// autosplitter setting
 	while((ready = poll(&pfd, 1, -1))) {
-		if (ready == -1) {
+		if (ready < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
@@ -174,7 +175,7 @@ app_cmd_t * app_cmd_poll(void) {
 	/* Reads the something when there is something */
 	while (true) {
 		len = read(event.readfd, cmd_buf.b, sizeof(cmd_buf.b));
-		if (len == -1) {
+		if (len < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
@@ -183,11 +184,12 @@ app_cmd_t * app_cmd_poll(void) {
 				// TOOD: Hopefully this becomes a stack-friendly tail recursion
 				return app_cmd_poll();
 			}
-			perror("read fail");
+			perror("read");
 			return NULL; // TODO: maybe `goto shutdown` instead?
 		}
 		else if (len == 0) {
-			perror("read fail (fd closed)");
+			printf("read 0 bytes\n");
+			perror("read");
 			return NULL; // TODO: maybe `goto shutdown` instead?
 		}
 
@@ -195,7 +197,7 @@ app_cmd_t * app_cmd_poll(void) {
 		if (len != sizeof(app_cmd_t) + cmd_buf.t.buf_len) {
 			LOG_ERRORF(
 				"Invalid cmd read len: %d read does not match %u reported",
-				len,
+				len - sizeof(app_cmd_t),
 				cmd_buf.t.buf_len
 			);
 		}

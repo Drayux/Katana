@@ -46,23 +46,22 @@ static int run_terminal_ui(void)
 	size_t len = 0;
 	int ready;
 
+	struct pollfd fds[2] = {
+		{
+			.fd = notify_fd,
+			.events = POLLIN
+		},
+		{
+			.fd = STDIN_FILENO,
+			.events = POLLIN | POLLHUP | POLLERR
+		},
+	};
+	
 	usleep(1000); // wait a bit before showing anything (lazy fix for now)
 	fputs("KATANA > ", stdout);
 	fflush(stdout);
 
 	while (true) {
-		struct pollfd fds[2] = {
-			{
-				// .fd = wakeup[0],
-				.fd = notify_fd,
-				.events = POLLIN
-			},
-			{
-				.fd = STDIN_FILENO,
-				.events = POLLIN | POLLHUP | POLLERR
-			},
-		};
-
 		ready = poll(fds, 2, -1);
 		if (ready < 0) {
 			if (errno == EINTR) {
@@ -72,20 +71,11 @@ static int run_terminal_ui(void)
 			break;
 		}
 
-		/* Wakeup not triggered by stdin */
-		if (fds[0].revents & POLLIN) {
-			CLEAR_EVENT(fds[0].fd);
-			if (atomic_load(&shutdown_requested)) {
-				break;
-			}
-			else {
-				fputs("KATANA > ", stdout);
-				fflush(stdout);
-				continue;
-			}
-		}
-
 		if (fds[1].revents & (POLLIN | POLLHUP | POLLERR)) {
+			// printf("poll: in %d, hup %d, err %d\n",
+				// !!(fds[1].revents & POLLIN),
+				// !!(fds[1].revents & POLLHUP),
+				// !!(fds[1].revents & POLLERR));
 			ssize_t n = read(STDIN_FILENO, buf + len, sizeof(buf) - len);
 			if (n < 0) {
 				if (errno == EINTR || errno == EAGAIN) {
@@ -150,6 +140,19 @@ static int run_terminal_ui(void)
 				len = 0;
 			}
 		}
+
+		/* Wakeup event (not triggered by stdin) */
+		if (fds[0].revents & POLLIN) {
+			CLEAR_EVENT(fds[0].fd);
+			if (atomic_load(&shutdown_requested)) {
+				break;
+			}
+			else {
+				fputs("KATANA > ", stdout);
+				fflush(stdout);
+				continue;
+			}
+		}
 	}
 
 // ui_shutdown:
@@ -159,6 +162,7 @@ static int run_terminal_ui(void)
 	// Shutdown the wake event fd
 	if (notify_fd > 2) {
 		close(notify_fd);
+		notify_fd = 0;
 	}
 
 	return 0;
@@ -187,12 +191,7 @@ static void * ui_main(void * arg)
 
 void ui_notify(void)
 {
-	// TODO: Should I assert the state of the FD before trying to write?
-	// char const x = 'x';
-	// (void) !write(wakeup[1], &x, 1);
-
-	// unsigned long long eggs_and_bacon = 1; // arbitrary
-	// (void) !write(notify_fd, &eggs_and_bacon, 8);
+	// TODO: assert the state of the FD before trying to write
 	SET_EVENT(notify_fd);
 }
 

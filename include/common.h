@@ -34,6 +34,7 @@
 
 /* Cleans up the multitude of eventfd notifications              *
  * This exists because of the strict 8-byte eventfd I/O          */
+// TODO: Considering moving this to ipc_common.h
 #define SET_EVENT(fd)                                             \
     do {                                                          \
         char _wake[8] = { 1 };                                    \
