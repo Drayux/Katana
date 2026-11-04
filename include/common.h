@@ -24,7 +24,7 @@
 #define NULL_FREE(ptr)                                      \
     do {                                                    \
         if ((ptr) == NULL) {                                \
-            LOG_DEBUGF("free: `%s` is NULL", #ptr);         \
+            LOG_DEBUG("free: `" #ptr "` is NULL");          \
         }                                                   \
 		else {                                              \
             free(ptr);                                      \

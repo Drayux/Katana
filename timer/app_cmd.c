@@ -53,16 +53,16 @@ static struct {
 // returns 0 on success
 static int app_cmd_init(void)
 {
-    int p[2];
+    int pipe_fds[2];
 
-    if (pipe2(p, O_NONBLOCK | O_CLOEXEC) == 0) {
-		event.readfd = p[0];
-		event.writefd = p[1];
+    if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
+		event.readfd = pipe_fds[0];
+		event.writefd = pipe_fds[1];
 		event.initialized = true;
 		return 0;
 	}
 	else {
-		perror("pipe2 fail");
+		perror("pipe fail");
 		return -errno;
 	}
 }

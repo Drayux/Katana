@@ -29,7 +29,6 @@
  * output as to which thread reported the message. In this model, every
  * such reporting thread will be called a `reporter_t`.
  */
-// typedef char[LOG_LINE_LEN] log_entry_t;
 typedef struct _reporter_typedef reporter_t;
 struct _reporter_typedef {
 	pthread_t id;
@@ -45,9 +44,9 @@ static struct {
 	pthread_t logging_thread;
 	pthread_mutex_t lock; // lock when modifying or traversing the reporters list
 	atomic_bool active; // dedicated logger thread is running
-
 	reporter_t * reporters; // Linked list, always ends in an "empty" tail
 	FILE * logfile;
+	int notify_fd;
 } shared_ctx = { 0 };
 
 /* PER-THREAD CONTEXT */
@@ -119,12 +118,14 @@ static reporter_t * _find_reporter(pthread_t id)
  */
 static void * log_consumer_loop(void * arg)
 {
-	size_t fds_len = 4; /* can be reasonably assumed */
+	size_t fds_len = 6; /* can be reasonably assumed */
 	struct pollfd * fds = calloc(fds_len, sizeof(struct pollfd));
 	ASSERT_ALLOC_GOTO(fds, consumer_exit);
 
 	size_t fds_len_new; /* for realloc, if needed */
 	struct pollfd * fds_new;
+
+	int notify_pipe[2] = { 0 };
 
 	int ready;
 	int fd_idx;
@@ -141,9 +142,19 @@ static void * log_consumer_loop(void * arg)
 	// (I might not want this, see consumer_exit.)
 
 	pthread_mutex_lock(&shared_ctx.lock);
+
+	/* set up a notify fd pipe -- always the first fd in the list */
+    if (pipe2(notify_pipe, O_NONBLOCK | O_CLOEXEC)) {
+		LOG_ERROR("pipe fail");
+		goto consumer_exit;
+	}
+	shared_ctx.notify_fd = notify_pipe[1];
+	fds->fd = notify_pipe[0];
+	fds->events = POLLIN;
+
 	while (1) {
-		memset(fds, 0, fds_len * sizeof(struct pollfd));
-		fd_count = 0;
+		memset(fds + 1, 0, (fds_len - 1) * sizeof(struct pollfd));
+		fd_count = 1;
 
 		telescope = shared_ctx.reporters;
 		while (telescope && !telescope->tail) {
@@ -172,23 +183,10 @@ static void * log_consumer_loop(void * arg)
 			telescope = telescope->next;
 		}
 
-		// TODO: We probably block here, what kind of signal do I want to use for shutdown?
-		/* TODO pt2: The main idea is "let the consumer hold the lock the entire
-		 * time it's alive. But...if I have an odd thread without a reporter, I
-		 * might as well let it emit while this thread is waiting. 
-		 * 
-		 * I think the way to do that might to have a double poll. The first is
-		 * non-blocking, both are the same otherwise. If we hit EWOULDBLOCK, then
-		 * unlock the mutex and sit on the blocking poll, else keep it locked.
-		 *
-		 * That said, that's such a rare scenario to matter....so I think this
-		 * current solution is fine for now. (Worse case, we get a few log
-		 * messages slightly out of order...only if I set up a thread wrong.)
-		 */ 
-		/* TODO pt3: If adding a thread after starting the logging thread, this
-		 * poll will still be waiting on the old FD set, so it never sees the
-		 * "added reporter" message until the next loop */
-
+		/* TODO: I'm indifferent about this implementation.
+		 * The main idea is "let the consumer hold the lock the entire time
+		 * that it's alive. But, if I have an odd thread without a reporter, I
+		 * might as well let it emit while this thread is waiting. */ 
 		pthread_mutex_unlock(&shared_ctx.lock);
 		//
 		ready = poll(fds, fd_count, -1);
@@ -201,7 +199,7 @@ static void * log_consumer_loop(void * arg)
 			goto consumer_exit;
 		}
 
-		for (fd_idx = 0; fd_idx < fd_count; ++fd_idx) {
+		for (fd_idx = 1; fd_idx < fd_count; ++fd_idx) {
 			if (fds[fd_idx].revents != 0) {
 				if (!(fds[fd_idx].revents & POLLIN)) {
 					err_msg = "pollfd returned error";
@@ -221,22 +219,34 @@ static void * log_consumer_loop(void * arg)
 				_emit_message(msg);
 			}
 		}
+
+		if (fds[0].revents & POLLIN) {
+			/* wake requested */
+			if (!atomic_load(&shared_ctx.active)) {
+				goto consumer_exit;
+			}
+		}
 	}
 
 consumer_exit:
-	/* NOTE: Important to unset active before logging shutdown events (or they'll be missed) */
-	// ^^ TODO: Actually, I could just deliberately never call "add_producer"
-	// for the logger thread....both would work, not sure which is more
-	// intuitive.
 	/* NOTE: Technically possible for this thread to error at the same time
-	 * we might (incorrectly) call start. This is gracefully ignored as this
-	 * thread is guarnateed to exit by this point (will not be joined.) */
+	 * that we might (incorrectly) call start. This is gracefully ignored as
+	 * this thread is guaranteed to exit by this point (will not be joined.) */
 	atomic_store(&shared_ctx.active, false);
 
 	if (err_msg) {
 		LOG_ERRORF("logger: %s", err_msg);
 	}
 	LOG_INFO("Logging thread exiting");
+	NULL_FREE(fds);
+
+	shared_ctx.notify_fd = 0; /* unset the field, we know it's never stdin */
+	if (notify_pipe[0] > 2) {
+		close(notify_pipe[0]);
+	}
+	if (notify_pipe[1] > 2) {
+		close(notify_pipe[1]);
+	}
 
 	pthread_mutex_unlock(&shared_ctx.lock);
 	return NULL;
@@ -318,38 +328,45 @@ int logging_init(void)
 void logging_shutdown(void)
 {
 	FILE * logfile_ref;
-	reporter_t * telescope = shared_ctx.reporters;
+	reporter_t * telescope;
 	reporter_t * chopping_block;
 
 	logging_thread_stop();
 
-	/* Grab exclusive control of the file pointer */
+	/* Grab exclusive control of the shared context */
 	pthread_mutex_lock(&shared_ctx.lock);
+	telescope = shared_ctx.reporters;
+	shared_ctx.reporters = NULL;
 	logfile_ref = shared_ctx.logfile;
 	shared_ctx.logfile = NULL;
 	pthread_mutex_unlock(&shared_ctx.lock);
+
+	// TODO: Surely the mutex needed to be cleaned up??
 
 	/* Any stray thread will only emit to stderr, now.
 	 * This *shouldn't* happen, but it is not undefined behavior. */
 
 	if (logfile_ref) {
-		fclose(shared_ctx.logfile);
+		fclose(logfile_ref);
 	}
 
 	/* Clean up reporters */
+	// NOTE: Do not use NULL_FREE here! This would invoke LOG_x *after*
+	// shutdown has started.
 	while (telescope) {
-		NULL_FREE(telescope->name);
-		if (telescope->msg_recv > 0) {
+		chopping_block = telescope;
+		if (chopping_block->msg_recv > 2) {
 			close(telescope->msg_recv);
 		}
-		if (telescope->msg_send > 0) {
+		if (chopping_block->msg_send > 2) {
 			close(telescope->msg_send);
 		}
-		chopping_block = telescope;
+		if (chopping_block->name) {
+			free(telescope->name);
+		}
 		telescope = chopping_block->next;
-		NULL_FREE(chopping_block);
+		free(chopping_block);
 	}
-	shared_ctx.reporters = NULL;
 }
 
 /* Start the dedicated log thread. Any messages queued before this will be
@@ -380,13 +397,36 @@ int logging_thread_stop(void)
 	int rval = 0;
 	if (atomic_load(&shared_ctx.active)) {
 		atomic_store(&shared_ctx.active, false);
-		// TODO: placeholder for signal the log thread (we're in main rn)
-		// ^^ this signal should ALWAYS make the thread exit and not depend on active
+		logging_thread_notify();
 
 		rval = pthread_join(shared_ctx.logging_thread, NULL);
 		/* any threads trying to log but blocked during shutdown will wake now */
 	}
 	return rval;
+}
+
+void logging_thread_notify(void)
+{
+	char const x = 'x';
+
+	/* mutex guarantees valid notify fd, it will not be closed if we hold it */
+	pthread_mutex_lock(&shared_ctx.lock);
+	if (shared_ctx.notify_fd > 0) {
+		(void) !write(shared_ctx.notify_fd, &x, 1);
+	}
+
+	// TODO: Do I want to warn for this? Right now I'm only using this in a way
+	// where failure is no cause for concern. 
+	// else {
+		/* NOTE/TODO: If the thread is running and the reporter is valid, this
+		 * will technically wake the logger thread. Else it'll just recursive
+		 * lock and emit directly.
+		 * While I think that this is fine, I wanted to make note of it in case
+		 * something goes wrong, as I'm not 100% sure of that conclusion. */
+		// LOG_ERROR("notify_fd invalid: Could not wake logger thread");
+	// }
+
+	pthread_mutex_unlock(&shared_ctx.lock);
 }
 
 // Register a new reporting thread
@@ -423,8 +463,7 @@ int logging_add_reporter(char const * friendly_name)
 	ref->msg_recv = pipe_fds[0];
 	ref->msg_send = pipe_fds[1];
 
-	/* new tail --  On the off chance this fails, the previous node will remain
-	 * as a tail and thus be cleaned up like normal during logging_shutdown. */
+	/* new tail; no release on failure, always cleaned up with shutdown */
 	tail = calloc(1, sizeof(reporter_t));
 	ASSERT_ALLOC(tail, 1);
 
@@ -438,7 +477,8 @@ int logging_add_reporter(char const * friendly_name)
 	local_reporter = ref;
 	LOG_DEBUGF("Registered thread %s (%d) with the logger",
 		friendly_name ? friendly_name : "null", (int) id);
-
+	logging_thread_notify(); /* If the logger is running, it is polling on the
+								previous set of reporters and won't see this. */
 	return 0;
 }
 
@@ -449,9 +489,10 @@ int logging_add_reporter(char const * friendly_name)
  *
  * @param[in] fmt The message to print in the log or the format string
  */
-void logMessage(char const * fmt, ...)
+void __log_message(char const * fmt, ...)
 {
 	va_list args;
+
 	char msg[LOG_LINE_LEN] = { 0 };
 	size_t msg_len;
 	ssize_t send_len;

@@ -24,8 +24,12 @@ int logging_init(void);
 void logging_shutdown(void);
 int logging_thread_start(void);
 int logging_thread_stop(void); // optional step: keeps log file open
+void logging_thread_notify(void);
 int logging_add_reporter(char const * friendly_name);
-void logMessage(char const * fmt, ...);
+
+/* not indended to be called directly, prefer the logger macros */
+void __log_message(char const * fmt, ...);
+/* --- */
 
 #define LOG_LEVEL_DEBUG 0
 #define LOG_LEVEL_INFO  1
@@ -46,12 +50,12 @@ void logMessage(char const * fmt, ...);
 
 #define LOG(T, message)                                                        \
 	{                                                                          \
-		logMessage(LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, message));     \
+		__log_message(LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, message));  \
 	}
 
 #define LOGF(T, fmt, ...)                                                      \
 	{                                                                          \
-		logMessage(                                                            \
+		__log_message(                                                         \
 			LOG_STRING(__FILE__, LOG__STR(__LINE__), #T, fmt), __VA_ARGS__);   \
 	}
 

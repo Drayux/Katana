@@ -150,10 +150,10 @@ static int run_terminal_ui(void)
 	atomic_store(&shutdown_requested, true);
 
 	// Shutdown the wakeup pipe
-	if (wakeup[0] > 0) {
+	if (wakeup[0] > 2) {
 		close(wakeup[0]);
 	}
-	if (wakeup[1] > 0) {
+	if (wakeup[1] > 2) {
 		close(wakeup[1]);
 	}
 

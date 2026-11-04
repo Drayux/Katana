@@ -142,7 +142,6 @@ int main(int argc, char * argv[])
 				// TODO: try to resolve a command from the autosplitter
 				break;
 			case APP_CMD_SPLIT:
-				// printf("TIMER SPLIT LET's GOOOO\n");
 				LOG_INFO("TIMER SPLIT LET's GOOOO");
 				break;
 			case APP_CMD_STOP:
@@ -186,9 +185,8 @@ shutdown:
 	// ipc_server_thread_shutdown();
 
 	// pthread_join(ipc_thread, NULL);
-	pthread_join(ui_thread, NULL);
+	// pthread_join(ui_thread, NULL);
 
-	printf("logger_shutdown\n");
 	logging_shutdown();
 
 	return status;
