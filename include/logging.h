@@ -49,17 +49,19 @@ void __log_message(char const * fmt, ...);
 #define LOG_STRING(file, line, level, message)                                 \
 	file ":" line " | " level " " message "\n"
 
-// TODO: __FILE_NAME__ is unique to clang and gcc. We'll need a fall back to
-// support other build systems, if this is a prudent goal.
+// TODO: __FILE_NAME__ is unique to clang and gcc. We'd need a fall back to
+// support toolchains, if this is a prudent goal.
 #define LOG(T, message)                                                        \
 	{                                                                          \
-		__log_message(LOG_STRING(__FILE_NAME__, LOG__STR(__LINE__), #T, message));  \
+		__log_message(                                                         \
+			LOG_STRING(__FILE_NAME__, LOG__STR(__LINE__), #T, message));       \
 	}
 
 #define LOGF(T, fmt, ...)                                                      \
 	{                                                                          \
 		__log_message(                                                         \
-			LOG_STRING(__FILE_NAME__, LOG__STR(__LINE__), #T, fmt), __VA_ARGS__);   \
+			LOG_STRING(__FILE_NAME__, LOG__STR(__LINE__), #T, fmt),            \
+			__VA_ARGS__);                                                      \
 	}
 
 #if LOG_LEVEL == LOG_LEVEL_DEBUG

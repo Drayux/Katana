@@ -241,7 +241,7 @@ consumer_exit:
 	LOG_INFO("Logging thread exiting");
 	NULL_FREE(fds);
 
-	if (shared_ctx.notify_fd > 2) {
+	if (shared_ctx.notify_fd > STDERR_FILENO) {
 		close(shared_ctx.notify_fd);
 	}
 	shared_ctx.notify_fd = 0; /* unset the field, we know it's never stdin */
@@ -354,10 +354,10 @@ void logging_shutdown(void)
 	// shutdown has started.
 	while (telescope) {
 		chopping_block = telescope;
-		if (chopping_block->msg_recv > 2) {
+		if (chopping_block->msg_recv > STDERR_FILENO) {
 			close(telescope->msg_recv);
 		}
-		if (chopping_block->msg_send > 2) {
+		if (chopping_block->msg_send > STDERR_FILENO) {
 			close(telescope->msg_send);
 		}
 		if (chopping_block->name) {
@@ -408,7 +408,7 @@ void logging_thread_notify(void)
 {
 	/* mutex guarantees valid notify fd, it will not be closed if we hold it */
 	pthread_mutex_lock(&shared_ctx.lock);
-	if (shared_ctx.notify_fd > 0) {
+	if (shared_ctx.notify_fd > STDERR_FILENO) {
 		SET_EVENT(shared_ctx.notify_fd);
 	}
 	pthread_mutex_unlock(&shared_ctx.lock);

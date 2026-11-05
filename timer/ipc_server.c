@@ -1,7 +1,6 @@
 #include "ipc_server.h"
 
 #include "environment.h"
-#include "logging.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -217,10 +216,10 @@ static void * ipc_server_main(void * arg)
 	}
 
 	LOG_INFO("IPC server thread exiting");
-    if (notify_fd > 2) {
+    if (notify_fd > STDERR_FILENO) {
 		close(notify_fd);
 	}
-    if (ipc_server_fd > 2) {
+    if (ipc_server_fd > STDERR_FILENO) {
 		close(ipc_server_fd);
 	}
 

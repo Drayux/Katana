@@ -1,9 +1,10 @@
 # libkatana declared in <repo>/lib/meson.build
 threads = dependency('threads')
 luajit = dependency('luajit')
-x11 = dependency('x11')
 openssl = dependency('openssl')
 # TODO: These should become optional at some point
+curses = dependency('curses')
+x11 = dependency('x11')
 gtk = dependency('gtk4', version: '>= 4.16', include_type: 'system')
 gtk_x11 = dependency('gtk4-x11', version: '>= 4.16', include_type: 'system')
 ### (and this one might become a plugin dependency not main project)
@@ -47,6 +48,9 @@ sources = files(
     'gui/widgets/help_dialog.c',
     'gui/widgets/settings_dialog.c',
     'keybinds/bind.c',
+
+    'frontends/livesplit/livesplit.c',
+    'frontends/tui/tui.c',
 
     # Keybinds
     'keybinds/keybinds.c',
@@ -96,7 +100,7 @@ executable(
     'katana',
     sources,
     resources,
-    dependencies: [ libkatana, threads, gtk, gtk_x11, luajit, x11, jansson, openssl ],
+    dependencies: [ libkatana, threads, curses, gtk, gtk_x11, luajit, x11, jansson, openssl ],
     c_args: extra_c_flags,
     install: true,
 )

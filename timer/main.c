@@ -1,5 +1,5 @@
+#include "common.h"
 #include "environment.h"
-#include "logging.h"
 
 #include "app_cmd.h"
 #include "ipc_server.h"
@@ -103,6 +103,7 @@ int main(int argc, char * argv[])
 
 	/* Spawn the GUI thread */
 	LOG_DEBUG("Start GUI thread");
+	(void) ui_load(NULL); // TODO: sets TUI mode for now
 	(void) ui_thread_start(&ui_thread);
 
 	LOG_INFO("Enter main application loop");

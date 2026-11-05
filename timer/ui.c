@@ -1,213 +1,131 @@
 #include "ui.h"
 
 #include "app_cmd.h"
-#include "gui/app_window.h"
-#include "gui/timer.h"
+#include "frontends/frontends.h"
 
 #include <fcntl.h>
-#include <gtk/gtk.h>
-#include <poll.h>
-#include <sched.h>
-#include <stdatomic.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-static LSApp * g_app = NULL;
-// static int wakeup[2] = { -1, -1 };
-static int notify_fd = 0;
-static atomic_bool shutdown_requested = false;
-
-static int run_gtk_ui(void)
-{
-	int status;
-
-	g_app = ls_app_new();
-
-	/* Blocking call */
-	status = g_application_run(G_APPLICATION(g_app), 0, NULL);
-	/* --- */
-
-	g_clear_object(&g_app);
-	return status;
-}
-
-/* This is the most basic of the basic UI modes.
- *
- * It simply watches stdin and maps key binds to app commands.
- * This mode exists primarily for testing purposes. */
-static int run_terminal_ui(void)
-{
-	// TODO: A better form of the UI would consume one character immediately
-	// and hide the prompt
-
-	char buf[16];
-	size_t len = 0;
-	int ready;
-
-	struct pollfd fds[2] = {
-		{
-			.fd = notify_fd,
-			.events = POLLIN
-		},
-		{
-			.fd = STDIN_FILENO,
-			.events = POLLIN | POLLHUP | POLLERR
-		},
-	};
-	
-	usleep(1000); // wait a bit before showing anything (lazy fix for now)
-	fputs("KATANA > ", stdout);
-	fflush(stdout);
-
-	while (true) {
-		ready = poll(fds, 2, -1);
-		if (ready < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			perror("poll");
-			break;
-		}
-
-		if (fds[1].revents & (POLLIN | POLLHUP | POLLERR)) {
-			// printf("poll: in %d, hup %d, err %d\n",
-				// !!(fds[1].revents & POLLIN),
-				// !!(fds[1].revents & POLLHUP),
-				// !!(fds[1].revents & POLLERR));
-			ssize_t n = read(STDIN_FILENO, buf + len, sizeof(buf) - len);
-			if (n < 0) {
-				if (errno == EINTR || errno == EAGAIN) {
-					continue;
-				}
-				perror("read");
-				break;
-			}
-			if (n == 0) {
-				fputs("(CTRL-D)\n", stdout);
-				break;
-			}
-			len += (size_t) n;
-
-			/* Dispatch every complete line in the buffer. */
-			char * start = buf;
-			char * nl;
-			while ((nl = memchr(start, '\n', (size_t) (buf + len - start)))) {
-				*nl = '\0';
-				/* --- Now `start` holds a NUL-terminated C string */
-				app_cmd_t cmd = {
-					.ts = 0,
-					.buf_len = 0,
-				};
-
-				if (*start == '\0') {
-					cmd.op = APP_CMD_SPLIT;
-					app_cmd_send_yield(&cmd);
-					// sched_yield();
-				}
-				else if (!strcmp(start, "quit")) {
-					cmd.op = APP_CMD_QUIT;
-					app_cmd_send_yield(&cmd);
-
-					// TODO: This is technically optional, this thread does
-					// not need to shut itself down, however, it raises an
-					// important design question!
-					//
-					// If something in the thread loop goes wrong and we exit,
-					// if the thread is the only (perhaps only *main*) method
-					// of shutdown, should this thread exiting mean that the
-					// timer should always follow suit?
-					//
-					// The program can keep timing a run even without a UI,
-					// but very few users will know this and *not* panic about
-					// losing their run.
-
-					// goto ui_shutdown;
-				}
-				else {
-					printf("entered: %s\n", start);
-				}
-
-				/* --- */
-				start = nl + 1;
-			}
-			len = (size_t) (buf + len - start);
-			memmove(buf, start, len);
-
-			if (len == sizeof(buf)) {
-				fprintf(stderr, "line too long, discarded\n");
-				len = 0;
-			}
-		}
-
-		/* Wakeup event (not triggered by stdin) */
-		if (fds[0].revents & POLLIN) {
-			CLEAR_EVENT(fds[0].fd);
-			if (atomic_load(&shutdown_requested)) {
-				break;
-			}
-			else {
-				fputs("KATANA > ", stdout);
-				fflush(stdout);
-				continue;
-			}
-		}
-	}
-
-// ui_shutdown:
-	// Only relevant if we break ourself
-	atomic_store(&shutdown_requested, true);
-
-	// Shutdown the wake event fd
-	if (notify_fd > 2) {
-		close(notify_fd);
-		notify_fd = 0;
-	}
-
-	return 0;
-}
+static struct {
+	pthread_t * thread;
+	pthread_mutex_t lock; // notify_fd lock
+	frontend_t * frontend;
+	int notify_fd;
+	bool headless;
+} ctx = {
+	// TODO: Indifferent about this interface. For now, assume headless mode
+	// unless ui_load is called. (Though, it may be better for main to
+	// conconditionally call ui_load? Do I want headless to be a proper "mode"
+	// or just the fallback? Interally NULL -> headless just makes sense, but
+	// to a settings menu, livesplit would make sense as the default.)
+	.headless = true,
+};
 
 static void * ui_main(void * arg)
 {
-    if ((notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC)) < 0) {
-		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
+	logging_add_reporter("ui");
+
+	/* Nothing to run without a frontend loaded */
+	if (!ctx.frontend) {
+		if (ctx.headless) {
+			// TODO: Maybe better to put this in main after resolving the options?
+			// ^^ no need to start the thread at all if we know this early, hence the error
+			LOG_ERROR("Running in headless mode, UI thread exiting");
+		}
+		else {
+			LOG_FATAL("Missing frontend but not in headless mode");
+		}
 		return NULL;
 	}
 
-	logging_add_reporter("ui");
+	if (ctx.frontend->prepare) {
+		ctx.frontend->prepare();
+	}
+	if (ctx.frontend->run) {
+		/* This call should be blocking */
+		ctx.frontend->run(ctx.notify_fd);
+		/* --- */
+	}
+	else {
+		LOG_ERROR("Selected UI frontend has no run call");
+	}
 
-	/* TODO: Windowing logic eventually be moved into a default plugin, and a
-	 * TUI will be the fallback */
-	(void) run_terminal_ui();
-	// (void) run_gtk_ui();
+	LOG_INFO("Frontend UI exiting");
 
-	LOG_INFO("UI thread exiting");
+	pthread_mutex_lock(&ctx.lock);
+	if (ctx.frontend->destroy) {
+		ctx.frontend->destroy();
+	}
+
+	if (ctx.notify_fd > STDERR_FILENO) {
+		close(ctx.notify_fd);
+		ctx.notify_fd = 0;
+	}
+	pthread_mutex_unlock(&ctx.lock);
+
 	return NULL;
 }
 
 
-/* --- */
+/* --- UI PUBLIC INTERFACE --- */
 
-void ui_notify(void)
+int ui_load(char const * frontend_name)
 {
-	// TODO: assert the state of the FD before trying to write
-	SET_EVENT(notify_fd);
+	ctx.headless = false;
+	ctx.frontend = frontend_select(frontend_name);
+
+	return ctx.frontend ? 0 : -1;
 }
 
+/*
+ * NOTE: Thread object is seperate so the main routine can join multiple
+ * threads at once.
+ *
+ * NOTE pt2: We're assering that thread_start is called before any thread might
+ * try to notify it or close it. This is the case for now, but a race condition
+ * could arise if that gets changed. */
 int ui_thread_start(pthread_t * thread)
 {
+	int status;
+
 	if (!thread) {
 		LOG_ERR("UI thread is NULL");
 		return -1;
 	}
-	return pthread_create(thread, NULL, &ui_main, NULL);
+	else if (ctx.thread) {
+		LOG_ERR("UI thread already running");
+		return -1;
+	}
+
+	if (!ctx.notify_fd) {
+		ctx.notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
+		if (ctx.notify_fd < 0) {
+			LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
+			return -1;
+		}
+	}
+	
+	pthread_mutex_init(&ctx.lock, NULL);
+	// TODO: Clean this up
+	// ^^ do I want to verify if it's already initialized or not?
+	// ^^ We can probably trust the value of thread that we do check
+
+	status = pthread_create(thread, NULL, &ui_main, NULL);
+	if (!status) {
+		/* success */
+		ctx.thread = thread;
+	}
+	return status;
 }
 
 void ui_thread_shutdown(void)
 {
-	if (!atomic_load(&shutdown_requested)) {
-		atomic_store(&shutdown_requested, true);
+	// if (!atomic_load(&shutdown_requested)) {
+		// atomic_store(&shutdown_requested, true);
 
 		// TODO: Possible resource race condition, this could be called after
 		// the UI thread starts shutting itself down (from the handler loop.)
@@ -217,5 +135,20 @@ void ui_thread_shutdown(void)
 		// - Other thread breaks, closes pipe FD
 		// - This thread resumes, calls notify on closed FD
 		ui_notify();
+	// }
+}
+
+void ui_notify(void)
+{
+	if (!pthread_mutex_trylock(&ctx.lock)) {
+		if (ctx.notify_fd > STDERR_FILENO) {
+			SET_EVENT(ctx.notify_fd);
+		}
+		pthread_mutex_unlock(&ctx.lock);
+	}
+	else {
+		/* This only happens if we're changing the state of notify_fd, which
+		 * means we're either too early or too late for it to matter. */
+		LOG_DEBUG("UI wake dropped");
 	}
 }
