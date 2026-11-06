@@ -8,8 +8,10 @@
 #include <locale.h>
 #include <poll.h>
 #include <sched.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 /* TODO:
@@ -43,19 +45,56 @@ frontend_t const tui_frontend = {
 /* --- INTERNAL --- */
 
 static struct {
-	SCREEN * screen;
-
-	WINDOW * log_bar;
-	WINDOW * log_window;
-	WINDOW * timer_bar;
+	WINDOW * timer_title;
 	WINDOW * timer_window;
-	WINDOW * input_line;
+	WINDOW * log_title;
+	WINDOW * log_window;
+	WINDOW * status;
 
-	// int stdout_pipe[2];
 	int stderr_pipe[2];
+	atomic_bool active;
 } ctx = { 0 };
+
+/* -- Component helpers -- */
+static void title_set_content(WINDOW * bar_win, const char * title);
  
-static void _bar(WINDOW * bar_win, const char *title)
+static void layout(void)
+{
+	if (ctx.log_title) delwin(ctx.log_title);
+	if (ctx.log_window) delwin(ctx.log_window);
+	if (ctx.timer_title) delwin(ctx.timer_title);
+	if (ctx.timer_window) delwin(ctx.timer_window);
+	if (ctx.status) delwin(ctx.status);
+
+	/* --- */
+
+	int const rows = LINES;
+	int const cols = COLS;
+
+	int const body_height = (rows > 4) ? rows - 3 : 2;
+	int const log_height = body_height / 3;
+	int const timer_height = body_height - log_height; // TODO: can be zero, make log hidden by default
+
+	/* --- */
+
+	ctx.timer_title = newwin(1, cols, 1 + log_height, 0);
+	title_set_content(ctx.timer_title, "KATANA");
+
+	ctx.timer_window = newwin(timer_height, cols, 2 + log_height, 0);
+    scrollok(ctx.timer_window, TRUE);
+
+	ctx.log_title = newwin(1, cols, 0, 0);
+	title_set_content(ctx.log_title, "DEBUG LOG");
+
+	ctx.log_window = newwin(log_height, cols, 1, 0);
+    scrollok(ctx.log_window, TRUE);
+
+	ctx.status = newwin(1, cols, 2 + log_height + timer_height, 0);
+    keypad(ctx.status, TRUE);
+    nodelay(ctx.status, TRUE); /* set non-blocking */
+}
+
+static void title_set_content(WINDOW * bar_win, const char * title)
 {
 	werase(bar_win);
 	wattron(bar_win, A_REVERSE);
@@ -64,88 +103,83 @@ static void _bar(WINDOW * bar_win, const char *title)
 	wnoutrefresh(bar_win);
 }
 
-static void _layout(void)
+/* TODO: Not 100% sure on the exchange of data, but there will likely be a form
+ * of "status/state" structure made available by the timer. Perhaps it's best
+ * to receive this structure and parse accordingly.
+ *
+ * Question is if I want this function to do the parsing, or just render
+ * whatever I send it. I overthink these questions..... */
+static void status_redraw(char * input)
 {
-	if (ctx.log_bar) delwin(ctx.log_bar);
-	if (ctx.log_window) delwin(ctx.log_window);
-	if (ctx.timer_bar) delwin(ctx.timer_bar);
-	if (ctx.timer_window) delwin(ctx.timer_window);
-	if (ctx.input_line) delwin(ctx.input_line);
+    werase(ctx.status);
+    mvwprintw(ctx.status, 0, 0, "KATANA > %s", input ? input : "");
+    wnoutrefresh(ctx.status);
+}
 
-	int rows = LINES;
-	int cols = COLS;
+static void log_draw_all(void)
+{
+	/* Half-placeholder function to get the log scrollback and draw everything */
 
-	int body_height = (rows > 4) ? rows - 3 : 2; /* 2 title bars + 1 input line */
-	int log_height = body_height / 2;
-	int timer_height = body_height - log_height;
+	char ** sb = logging_get_scrollback(-20); // TODO
+	char * line;
 
-	ctx.log_bar = newwin(1, cols, 0, 0);
-	ctx.log_window = newwin(log_height, cols, 1, 0);
-	ctx.timer_bar = newwin(1, cols, 1 + log_height, 0);
-	ctx.timer_window = newwin(timer_height, cols, 2 + log_height, 0);
-	ctx.input_line = newwin(1, cols, 2 + log_height + timer_height, 0);
+    // werase(ctx.log_window);
 
-	scrollok(ctx.log_window, TRUE);
-	scrollok(ctx.log_window, TRUE);
-	keypad(ctx.input_line, TRUE);
-	nodelay(ctx.input_line, TRUE);
+	for (int i = 0; i < 20; ++i) {
+		line = sb[i];
+		if (!line) {
+			break;
+		}
+		// waddnstr(ctx.log_window, line, strlen(line));
+		printf("log message: %s\n", line);
+	}
 
-	_bar(ctx.log_bar, "stderr (log)");
-	_bar(ctx.timer_bar, "stdout / input");
-
-	wnoutrefresh(ctx.log_window);
+	free(sb);
+	// wnoutrefresh(ctx.log_window);
+}
+static void log_append(char * msg, ssize_t len)
+{
+	if (msg && len > 0) {
+		waddnstr(ctx.log_window, msg, len);
+	}
 	wnoutrefresh(ctx.log_window);
 }
 
-static void _redraw(char * input)
-{
-    werase(ctx.input_line);
-    mvwprintw(ctx.input_line, 0, 0, " > %.*s", 10, input ? input : "-");
-    wnoutrefresh(ctx.input_line);
+/* --- */
+
+static int handle_wake(void) {
+	if (atomic_load(&ctx.active)) {
+		return -1;
+	}
+
+	LOG_DEBUG("UI wake but nothing to do");
+	return 0;
 }
+
+/* --- FRONTEND API IMPL. --- */
 
 static int tui_init(void)
 {
-	// int ctx.stdout_pipe[2];
-	// if (pipe(ctx.stdout_pipe) < 0 || pipe(ctx.stderr_pipe) < 0) {
+	setlocale(LC_ALL, "");
 
 	if (pipe(ctx.stderr_pipe) < 0) {
         return -1;
 	}
-
-	setlocale(LC_ALL, "");
-
-	fflush(stdout);
-	fflush(stderr);
-
-	// int saved_out = dup(STDOUT_FILENO);
-	// int saved_err = dup(STDERR_FILENO);
-	// if (saved_out < 0 || saved_err < 0 || !tty) {
-
-	FILE * tty = fdopen(dup(STDOUT_FILENO), "w");
-	if (!tty) {
-		// TODO: actually clean these up properly
-		// ^^ I probably need to use that saved_out var for cleanup
-		printf("couldn't prepare the curses env\n");
-		return -1;
-	}
-
-	ctx.screen = newterm(NULL, tty, stdin);
-	if (!ctx.screen) {
-		printf("couldn't open the curses screen\n");
-		return -1;
-	}
-
-	set_term(ctx.screen);
-	cbreak();
-	noecho();
-
-	curs_set(1);
-	_layout();
-
-	// dup2(stdout_pipe[1], STDOUT_FILENO);
 	dup2(ctx.stderr_pipe[1], STDERR_FILENO);
-	setvbuf(stdout, NULL, _IOLBF, 0);
+	// fflush(stderr);
+
+	atomic_store(&ctx.active, true);
+
+	// TODO: Check for errors here (probably)
+    // initscr();
+    // cbreak();
+    // noecho();
+
+	// layout();
+	log_draw_all();
+	// status_redraw(NULL);
+
+	// doupdate();
 
 	return 0;
 }
@@ -155,16 +189,16 @@ static int tui_release(void)
 	return 0;
 }
 
+/* NOTE: I'm having a tough time designing the hierarcy of order here.
+ * For now, be sure to exit if notify_fd throws an error so we don't listen
+ * on a stale FD. That said, I have .run with an fd and yet a dedicated
+ * .notify handler, so we could just create and store that internally? */
 static int tui_main(int notify_fd)
 {
-	// NOTE: I'm having a tough time designing the hierarcy of order here.
-	// For now, be sure to exit if notify_fd throws an error so we don't listen
-	// on a stale FD. That said, I have run with an fd and yet a dedicated
-	// .notify handler, so we could just create and store that internally?
-
-	ssize_t read_len;
-	char input;
+	// ssize_t read_len;
+	// char input;
 	int ready;
+	int status = 0;
 
 	struct pollfd fds[] = {
 		{
@@ -181,36 +215,29 @@ static int tui_main(int notify_fd)
 		},
 	};
 
-	_redraw(NULL);
-	doupdate();
-
 	while (true) {
-		ready = poll(fds, 3, -1);
-		if (ready < 0) {
+		/* --- Blocking --- */
+		if ((ready = poll(fds, 3, -1)) < 0) {
 			if (errno == EINTR) {
 				continue;
 			}
 			perror("poll");
-			break;
+			goto shutdown;
 		}
+		/* --- */
 		if (fds[2].revents & (POLLHUP | POLLERR)) {
 			/* Kill the UI if stdin closes or errors, it would be unresponsive */
-			perror("read");
-			// printf("poll: in %d, hup %d, err %d\n",
-				// !!(fds[1].revents & POLLIN),
-				// !!(fds[1].revents & POLLHUP),
-				// !!(fds[1].revents & POLLERR));
-			break;
+			status = errno;
+			perror("io");
+			goto shutdown;
 		}
+
 		/* Check for a wakeup event (not stdin) */
 		if (fds[0].revents & POLLIN) {
 			CLEAR_EVENT(fds[0].fd);
-			// if (atomic_load(&shutdown_requested)) {
-				// break;
-			// }
-			// LOG_DEBUG("UI wake but nothing to do");
-			// continue; // not necessary, just here for testing the logic
-			break;
+			if (handle_wake() < 0) {
+				goto shutdown;
+			}
 		}
 
 		/* Grab any new log output */
@@ -218,61 +245,111 @@ static int tui_main(int notify_fd)
 			char log_buf[1024];
 			ssize_t len;
 
-			while ((len = read(fds[1].fd, log_buf, sizeof(log_buf))) > 0) {
-				waddnstr(ctx.log_window, log_buf, len);
-			}
-			wnoutrefresh(ctx.log_window);
-			doupdate();
+			// while ((len = read(fds[1].fd, log_buf, sizeof(log_buf))) > 0) {
+				// waddnstr(ctx.log_window, log_buf, len);
+			// }
+			len = read(fds[1].fd, log_buf, sizeof(log_buf));
+			log_append(log_buf, len);
+			// log_draw_all();
 		}
 
 		/* Read data from stdin */
-		if (fds[2].revents & POLLIN) {
-			/* Every UI interaction is 1 byte */
-			while ((read_len = read(STDIN_FILENO, &input, 1))) {
-				if (read_len < 0) {
-					switch (errno) {
-						default:
-							perror("read");
+        int ch;
+        while ((ch = wgetch(ctx.status)) != ERR) {
+            switch (ch) {
+				case KEY_RESIZE:
+					layout();
+					fprintf(stderr, "resize\n");
+					break;
+
+				case '\n':
+				case '\r':
+				case KEY_ENTER:
+					fprintf(stderr, "newline\n");
+					break;
+
+				case '\b':
+				case 127:
+				case KEY_BACKSPACE:
+					fprintf(stderr, "backspace\n");
+					break;
+
+				default:
+					// if (ch >= 32 && ch < 127 && len < sizeof line - 1) {
+						// line[len++] = ch;
+						// line[len] = '\0';
+					// }
+					// char buf[2] = { 0 };
+					// if (ch >= 32 && ch < 127 && len < sizeof line - 1) {
+						// buf[0] = ch;
+						// refresh_input_line(buf);
+					// }
+					break;
+            }
+        }
+		char buf[2] = { 0 };
+		if (ch >= 32 && ch < 127) {
+			buf[0] = ch;
+		} else {
+			buf[0] = '\0';
+		}
+		status_redraw(buf); /* AKA _redraw_input */
+        doupdate();
+
+		// if (fds[2].revents & POLLIN) {
+			// /* Every UI interaction is 1 byte */
+			// while ((read_len = read(STDIN_FILENO, &input, 1))) {
+				// if (read_len < 0) {
+					// switch (errno) {
+						// default:
+							// perror("read");
 							// fallthrough
-						case EAGAIN:
+						// case EAGAIN:
 							// TODO: maybe `goto ui_shutdown;`
-							break;
+							// break;
 
-						case EINTR:
-							/* OK - try again */
-							continue;
-					}
-					break; /* inner loop */
-				}
-				char buf[2] = { 0 };
-				buf[0] = input;
+						// case EINTR:
+							// /* OK - try again */
+							// continue;
+					// }
+					// break; /* inner loop */
+				// }
+				// char buf[2] = { 0 };
+				// buf[0] = input;
 
-				LOG_INFOF("Received char: %s", buf);
+				// LOG_INFOF("Received char: %s", buf);
 				// printf("Received char: %s\n", buf);
-				_redraw(buf);
-				doupdate();
-			}
+				// refresh_input_line(buf); /* AKA _redraw_input */
+				// doupdate();
+			// }
 
-			if (!read_len) {
-				/* empty, CTRL-D or something like that */
+			// if (!read_len) {
+				// /* empty, CTRL-D or something like that */
 				// ui_terminal_step(NULL);
 				// TODO: There's a chance CTRL-Z will kill this maybe?
-				LOG_INFO("Received EOF, exiting UI loop");
-				break;
-			}
-		}
+
+				// LOG_INFO("Received EOF, exiting UI loop");
+				// break;
+
+				// LOG_INFO("Received EOF");
+				// continue;
+			// }
+		// }
 	}
 
-// ui_shutdown:
+shutdown:
 	// atomic_store(&shutdown_requested, true);
-	return 0;
+    endwin();
+	return status;
 }
 
 static int tui_shutdown(void)
 {
+	atomic_store(&ctx.active, false);
 	return 0;
 }
 
+// HOlding onto this just until I extract the app_cmd stuff
 static void _old_prompt_logic(void)
 {
 	char buf[16] = { 0 }; // NOTE: would be populated from stdin read

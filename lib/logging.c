@@ -19,6 +19,7 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/prctl.h>
+#include <sys/types.h>
 #include <threads.h>
 #include <time.h>
 #include <unistd.h>
@@ -47,6 +48,8 @@ static struct {
 	atomic_bool active; // dedicated logger thread is running
 	reporter_t * reporters; // Linked list, always ends in an "empty" tail
 	FILE * logfile;
+	char ** scrollback;
+	ssize_t scrollback_idx; // Negative indicates buffer is full, so we've looped
 	int notify_fd;
 } shared_ctx = { 0 };
 
@@ -64,10 +67,60 @@ thread_local static reporter_t * local_reporter = NULL;
  */
 static inline void _emit_message(char const * const msg)
 {
+	ssize_t sb_idx; /* scrollback buf working index */
+	char * sb_cur; /* holder for the working sb line */
+	size_t sb_ll; /* scrollback buf new line length */
+
 	fprintf(stderr, "%s", msg);
+
 	if (shared_ctx.logfile) {
 		fprintf(shared_ctx.logfile, "%s", msg);
 		fflush(shared_ctx.logfile);
+	}
+
+	if (shared_ctx.scrollback) {
+		sb_ll = strlen(msg);
+
+		if (shared_ctx.scrollback_idx < 0) {
+			/* Scrollback buffer has looped */
+			sb_idx = -shared_ctx.scrollback_idx;
+			sb_cur = shared_ctx.scrollback[sb_idx];
+
+			if (sb_ll > strlen(sb_cur)) {
+				shared_ctx.scrollback[sb_idx] = realloc(sb_cur, sb_ll + 1);
+				if (errno) {
+					/* give up if no memory */
+					fprintf(stderr, "No memory for logger scrollback realloc\n");
+					return;
+				}
+			}
+		}
+		else {
+			sb_idx = shared_ctx.scrollback_idx;
+			shared_ctx.scrollback[sb_idx] = malloc(sb_ll + 1);
+			if (!shared_ctx.scrollback[sb_idx]) {
+				/* give up if no memory */
+				fprintf(stderr, "No memory for logger scrollback alloc\n");
+				return;
+			}
+		}
+
+		sb_cur = shared_ctx.scrollback[sb_idx];
+		memcpy(sb_cur, msg, sb_ll + 1);
+
+		// TODO: I can get more clever with these numbers, I think something
+		// along the postive is normal, negative is max_len + (-idx) gets the
+		// correct line would work out more cleanly
+		//
+		// Don't forget to also update get_scrollback
+		++sb_idx;
+		if (sb_idx >= LOG_HIST_LEN) {
+			shared_ctx.scrollback_idx = (-sb_idx % LOG_HIST_LEN);
+		}
+		else {
+			shared_ctx.scrollback_idx = (shared_ctx.scrollback_idx < 0) ?
+				-sb_idx : sb_idx;
+		}
 	}
 }
 
@@ -272,6 +325,7 @@ int logging_init(void)
 
 	shared_ctx.reporters = NULL;
 	shared_ctx.logfile = NULL;
+	shared_ctx.scrollback = NULL;
 
 	int rval = 0;
 	char logfile_path[PATH_MAX + 1] = { 0 };
@@ -313,6 +367,12 @@ int logging_init(void)
 	if (logging_add_reporter("main")) {
 		rval = 1;
 	}
+
+#if defined(LOG_HIST_LEN) && (LOG_HIST_LEN > 0)
+	/* Create scrollback buffer (array of char pointers) */
+	shared_ctx.scrollback = calloc(LOG_HIST_LEN, sizeof(char *));
+	ASSERT_ALLOC(shared_ctx.scrollback, 1);
+#endif
 	return rval;
 }
 
@@ -525,4 +585,63 @@ void __log_message(char const * fmt, ...)
 			perror("write fail");
 		}
 	}
+}
+
+/*
+ * Gets the stored log buf either from line number X if rel_lines is positive,
+ * or X number of the most recent lines if negative
+ * 
+ * Returned pointer must be freed by caller if non-NULL
+ */
+// TODO: Consider introducing a build option "enable scrollback" because this
+// is quite a bit of extra memory (relatively) for such a small feature.
+char ** logging_get_scrollback(int rel_lines)
+{
+	char ** adjusted_sb;
+	size_t sb_idx;
+
+	if (!shared_ctx.scrollback) {
+		return NULL;
+	}
+
+	if (rel_lines > 0) {
+		// TODO
+		return NULL;
+	}
+
+	/* Adjust lines requested to a capped, positve value */
+	rel_lines = (-rel_lines + 1 > LOG_LINE_LEN) ? LOG_LINE_LEN - 1 : -rel_lines;
+	sb_idx = (shared_ctx.scrollback_idx < 0) ?
+		-shared_ctx.scrollback_idx : shared_ctx.scrollback_idx;
+
+	adjusted_sb = calloc(rel_lines + 1, sizeof(char *));
+	ASSERT_ALLOC(adjusted_sb, NULL);
+
+	/* Lock so as not grab a mangled scrollback line pointer or line idx */
+	// TOOD: This could almost certainly be faster with a two-step memcpy
+	// Slow version is to assure correctness for testing
+	pthread_mutex_lock(&shared_ctx.lock);
+	for (int i = 0; i < rel_lines; ++i) {
+		adjusted_sb[i] = shared_ctx.scrollback[(sb_idx + i) % LOG_HIST_LEN];
+		if (adjusted_sb[i] == NULL) {
+			break;
+		}
+	}
+	pthread_mutex_unlock(&shared_ctx.lock);
+
+	// NOTE! It is TECHNICALLY possible that a log line to which we've copied
+	// the pointer is has realloc called on it, the main memory moves, and then
+	// we hold a dead pointer. This would equate to an unchecked use-after-free.
+	//
+	// For now, I'm committing to the rationale "roll with it because it's
+	// never going to happen" but this is important to know from a long term
+	// design standpoint.
+	//
+	// Definitely should (TODO) fix this at some point, but I figure I'll wait
+	// until I determine if I want to keep the implementation like this or not.
+	// (Entertaining the idea of a singleton "adjusted buffer" which blocks
+	// the logger until it's released. There would be an extra function for
+	// that implemented here, in that case.)
+
+	return adjusted_sb;
 }

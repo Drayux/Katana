@@ -20,6 +20,7 @@
 
 #define LOG_LINE_LEN   256
 #define LOG_THREAD_LEN  24
+#define LOG_HIST_LEN    64
 
 int logging_init(void);
 void logging_shutdown(void);
@@ -27,6 +28,7 @@ int logging_thread_start(void);
 int logging_thread_stop(void); // optional step: keeps log file open
 void logging_thread_notify(void);
 int logging_add_reporter(char const * friendly_name);
+char ** logging_get_scrollback(int rel_lines);
 
 /* not indended to be called directly, prefer the logger macros */
 void __log_message(char const * fmt, ...);
