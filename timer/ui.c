@@ -43,7 +43,10 @@ static void * ui_main(void * arg)
 	}
 
 	if (ctx.frontend->prepare) {
-		ctx.frontend->prepare();
+		if (ctx.frontend->prepare()) {
+			/* UI failed to start */
+			return NULL;
+		}
 	}
 	if (ctx.frontend->run) {
 		/* This call should be blocking */

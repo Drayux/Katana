@@ -67,9 +67,9 @@ thread_local static reporter_t * local_reporter = NULL;
  */
 static inline void _emit_message(char const * const msg)
 {
-	ssize_t sb_idx; /* scrollback buf working index */
-	char * sb_cur; /* holder for the working sb line */
-	size_t sb_ll; /* scrollback buf new line length */
+	size_t sb_idx; /* scrollback buf working index */
+	size_t sb_line_len; /* scrollback buf new line length */
+	char * sb_line_ref; /* holder for the working sb line */
 
 	fprintf(stderr, "%s", msg);
 
@@ -78,16 +78,29 @@ static inline void _emit_message(char const * const msg)
 		fflush(shared_ctx.logfile);
 	}
 
+	/* NOTE - about the scrollback index:
+	 * Negative means "fresh" / no loop -- begins at -LOG_HIST_LEN
+	 * Thus, if we store 256 items, first index is -256. To use this,
+	 * scrollback[ (idx + LOG_HIST_LEN) % LOG_HIST_LEN is used ] Thus:
+	 *    -256 -> sb[0]
+	 * 	   -10 -> sb[246] // arbitrary middle value
+	 * 	    -1 -> sb[255]
+	 *       0 -> sb[0] // modulo rollover
+	 *       1 -> sb[1]
+	 *      10 -> sb[10]
+	 *     255 -> sb[255]
+	 *   ( 256 -> sb[0] // double rollover )
+	 * Note that double rollover would not be seen, as we will always store
+	 * `computed_index % LOG_HIST_LEN` to guarantee numerical stability. */
 	if (shared_ctx.scrollback) {
-		sb_ll = strlen(msg);
+		sb_idx = (shared_ctx.scrollback_idx + LOG_HIST_LEN) % LOG_HIST_LEN;
+		sb_line_len = strlen(msg);
+		sb_line_ref = shared_ctx.scrollback[sb_idx];
 
-		if (shared_ctx.scrollback_idx < 0) {
+		if (shared_ctx.scrollback_idx >= 0) {
 			/* Scrollback buffer has looped */
-			sb_idx = -shared_ctx.scrollback_idx;
-			sb_cur = shared_ctx.scrollback[sb_idx];
-
-			if (sb_ll > strlen(sb_cur)) {
-				shared_ctx.scrollback[sb_idx] = realloc(sb_cur, sb_ll + 1);
+			if (sb_line_len > strlen(sb_line_ref)) {
+				sb_line_ref = realloc(sb_line_ref, sb_line_len + 1);
 				if (errno) {
 					/* give up if no memory */
 					fprintf(stderr, "No memory for logger scrollback realloc\n");
@@ -96,31 +109,19 @@ static inline void _emit_message(char const * const msg)
 			}
 		}
 		else {
-			sb_idx = shared_ctx.scrollback_idx;
-			shared_ctx.scrollback[sb_idx] = malloc(sb_ll + 1);
-			if (!shared_ctx.scrollback[sb_idx]) {
+			sb_line_ref = malloc(sb_line_len + 1);
+			if (!sb_line_ref) {
 				/* give up if no memory */
 				fprintf(stderr, "No memory for logger scrollback alloc\n");
 				return;
 			}
 		}
 
-		sb_cur = shared_ctx.scrollback[sb_idx];
-		memcpy(sb_cur, msg, sb_ll + 1);
+		// printf("Writing at %d: `%s`\n", sb_idx, msg); /// TODO remove
+		memcpy(sb_line_ref, msg, sb_line_len + 1);
 
-		// TODO: I can get more clever with these numbers, I think something
-		// along the postive is normal, negative is max_len + (-idx) gets the
-		// correct line would work out more cleanly
-		//
-		// Don't forget to also update get_scrollback
-		++sb_idx;
-		if (sb_idx >= LOG_HIST_LEN) {
-			shared_ctx.scrollback_idx = (-sb_idx % LOG_HIST_LEN);
-		}
-		else {
-			shared_ctx.scrollback_idx = (shared_ctx.scrollback_idx < 0) ?
-				-sb_idx : sb_idx;
-		}
+		shared_ctx.scrollback[sb_idx] = sb_line_ref;
+		shared_ctx.scrollback_idx = (shared_ctx.scrollback_idx + 1) % LOG_HIST_LEN;
 	}
 }
 
@@ -326,6 +327,7 @@ int logging_init(void)
 	shared_ctx.reporters = NULL;
 	shared_ctx.logfile = NULL;
 	shared_ctx.scrollback = NULL;
+	shared_ctx.scrollback_idx = -LOG_HIST_LEN;
 
 	int rval = 0;
 	char logfile_path[PATH_MAX + 1] = { 0 };
@@ -608,13 +610,25 @@ char ** logging_get_scrollback(int rel_lines)
 		// TODO
 		return NULL;
 	}
+	
+	/* Cap the lines requested, else the math gets weird */
+	// if (rel_lines < -LOG_HIST_LEN) {
+		// rel_lines = -LOG_HIST_LEN;
+	// }
 
-	/* Adjust lines requested to a capped, positve value */
-	rel_lines = (-rel_lines + 1 > LOG_LINE_LEN) ? LOG_LINE_LEN - 1 : -rel_lines;
-	sb_idx = (shared_ctx.scrollback_idx < 0) ?
-		-shared_ctx.scrollback_idx : shared_ctx.scrollback_idx;
+	sb_idx = shared_ctx.scrollback_idx + rel_lines + LOG_HIST_LEN;
+	if (sb_idx < 0) {
+		/* requested more lines than we have available */
+		rel_lines = sb_idx - rel_lines;
+		sb_idx = 0;
+	}
+	else {
+		rel_lines = -rel_lines;
+		sb_idx = sb_idx % LOG_HIST_LEN;
+	}
+	// -- rel_lines asserted positive now
 
-	adjusted_sb = calloc(rel_lines + 1, sizeof(char *));
+	adjusted_sb = calloc(rel_lines, sizeof(char *));
 	ASSERT_ALLOC(adjusted_sb, NULL);
 
 	/* Lock so as not grab a mangled scrollback line pointer or line idx */

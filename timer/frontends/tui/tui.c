@@ -44,24 +44,35 @@ frontend_t const tui_frontend = {
 
 /* --- INTERNAL --- */
 
+typedef enum {
+	// TODO: Hidden by default
+	INFO_VIEW_HELP = 1,
+	INFO_VIEW_LOG,
+	INFO_VIEW_DEBUG,
+} info_view_t;
+
 static struct {
-	WINDOW * timer_title;
-	WINDOW * timer_window;
-	WINDOW * log_title;
-	WINDOW * log_window;
-	WINDOW * status;
+	atomic_bool active;
 
 	int stderr_pipe[2];
-	atomic_bool active;
+
+	WINDOW * timer_title;
+	WINDOW * timer_window;
+	WINDOW * info_title;
+	WINDOW * info_window;
+	WINDOW * status;
+
+	info_view_t info_view_setting;
 } ctx = { 0 };
 
 /* -- Component helpers -- */
 static void title_set_content(WINDOW * bar_win, const char * title);
+static void info_redraw(WINDOW * info_title, WINDOW * info_window);
  
 static void layout(void)
 {
-	if (ctx.log_title) delwin(ctx.log_title);
-	if (ctx.log_window) delwin(ctx.log_window);
+	if (ctx.info_title) delwin(ctx.info_title);
+	if (ctx.info_window) delwin(ctx.info_window);
 	if (ctx.timer_title) delwin(ctx.timer_title);
 	if (ctx.timer_window) delwin(ctx.timer_window);
 	if (ctx.status) delwin(ctx.status);
@@ -72,24 +83,22 @@ static void layout(void)
 	int const cols = COLS;
 
 	int const body_height = (rows > 4) ? rows - 3 : 2;
-	int const log_height = body_height / 3;
-	int const timer_height = body_height - log_height; // TODO: can be zero, make log hidden by default
+	int const info_height = body_height / 3;
+	int const timer_height = body_height - info_height; // TODO: can be zero, make log hidden by default
 
 	/* --- */
 
-	ctx.timer_title = newwin(1, cols, 1 + log_height, 0);
+	ctx.timer_title = newwin(1, cols, 1 + info_height, 0);
 	title_set_content(ctx.timer_title, "KATANA");
 
-	ctx.timer_window = newwin(timer_height, cols, 2 + log_height, 0);
+	ctx.timer_window = newwin(timer_height, cols, 2 + info_height, 0);
     scrollok(ctx.timer_window, TRUE);
 
-	ctx.log_title = newwin(1, cols, 0, 0);
-	title_set_content(ctx.log_title, "DEBUG LOG");
+	ctx.info_title = newwin(1, cols, 0, 0);
+	ctx.info_window = newwin(info_height, cols, 1, 0);
+	info_redraw(ctx.info_title, ctx.info_window);
 
-	ctx.log_window = newwin(log_height, cols, 1, 0);
-    scrollok(ctx.log_window, TRUE);
-
-	ctx.status = newwin(1, cols, 2 + log_height + timer_height, 0);
+	ctx.status = newwin(1, cols, 2 + info_height + timer_height, 0);
     keypad(ctx.status, TRUE);
     nodelay(ctx.status, TRUE); /* set non-blocking */
 }
@@ -103,6 +112,63 @@ static void title_set_content(WINDOW * bar_win, const char * title)
 	wnoutrefresh(bar_win);
 }
 
+static void log_draw_all(void)
+{
+	/* Half-placeholder function to get the log scrollback and draw everything */
+
+	char ** sb = logging_get_scrollback(-5); // TODO
+	char * line;
+
+    werase(ctx.info_window);
+
+	for (int i = 0; i < 5; ++i) {
+		line = sb[i];
+		if (!line) {
+			break;
+		}
+		waddnstr(ctx.info_window, line, strlen(line));
+	}
+
+	free(sb);
+	wnoutrefresh(ctx.info_window);
+}
+static void log_append(char * msg, ssize_t len)
+{
+	if (ctx.info_view_setting == INFO_VIEW_LOG) {
+		if (msg && len > 0) {
+			waddnstr(ctx.info_window, msg, len);
+		}
+		wnoutrefresh(ctx.info_window);
+	}
+}
+
+// reminder that we pass in params so I can populate a new info window before
+// actually using it
+static void info_redraw(WINDOW * info_title, WINDOW * info_window)
+{
+	char const * new_title = "UNKNOWN";
+
+	switch (ctx.info_view_setting) {
+		case INFO_VIEW_HELP:
+			new_title = "HELP";
+			break;
+		case INFO_VIEW_LOG:
+			new_title = "DEBUG LOG";
+
+			scrollok(info_window, TRUE);
+
+			/* TODO: Don't quite love this passing, it's a bit inconsistent
+			 * with what is responsible for triggering the refresh */
+			log_draw_all();
+			// wnoutrefresh(info_window);
+			break;
+		case INFO_VIEW_DEBUG:
+			new_title = "DEBUG INFO";
+			break;
+	}
+	title_set_content(info_title, new_title);
+}
+
 /* TODO: Not 100% sure on the exchange of data, but there will likely be a form
  * of "status/state" structure made available by the timer. Perhaps it's best
  * to receive this structure and parse accordingly.
@@ -114,35 +180,6 @@ static void status_redraw(char * input)
     werase(ctx.status);
     mvwprintw(ctx.status, 0, 0, "KATANA > %s", input ? input : "");
     wnoutrefresh(ctx.status);
-}
-
-static void log_draw_all(void)
-{
-	/* Half-placeholder function to get the log scrollback and draw everything */
-
-	char ** sb = logging_get_scrollback(-20); // TODO
-	char * line;
-
-    // werase(ctx.log_window);
-
-	for (int i = 0; i < 20; ++i) {
-		line = sb[i];
-		if (!line) {
-			break;
-		}
-		// waddnstr(ctx.log_window, line, strlen(line));
-		printf("log message: %s\n", line);
-	}
-
-	free(sb);
-	// wnoutrefresh(ctx.log_window);
-}
-static void log_append(char * msg, ssize_t len)
-{
-	if (msg && len > 0) {
-		waddnstr(ctx.log_window, msg, len);
-	}
-	wnoutrefresh(ctx.log_window);
 }
 
 /* --- */
@@ -171,15 +208,16 @@ static int tui_init(void)
 	atomic_store(&ctx.active, true);
 
 	// TODO: Check for errors here (probably)
-    // initscr();
-    // cbreak();
-    // noecho();
+    initscr();
+    cbreak();
+    noecho();
 
-	// layout();
-	log_draw_all();
-	// status_redraw(NULL);
+	ctx.info_view_setting = INFO_VIEW_LOG; // default for now
 
-	// doupdate();
+	layout();
+	status_redraw(NULL);
+
+	doupdate();
 
 	return 0;
 }
@@ -246,7 +284,7 @@ static int tui_main(int notify_fd)
 			ssize_t len;
 
 			// while ((len = read(fds[1].fd, log_buf, sizeof(log_buf))) > 0) {
-				// waddnstr(ctx.log_window, log_buf, len);
+				// waddnstr(ctx.info_window, log_buf, len);
 			// }
 			len = read(fds[1].fd, log_buf, sizeof(log_buf));
 			log_append(log_buf, len);
