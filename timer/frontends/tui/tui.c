@@ -27,7 +27,7 @@
 
 static int tui_init(void);
 static int tui_release(void);
-static int tui_main(int notify_fd);
+static int tui_main(int listen_fd);
 // static int tui_notify(void);
 static int tui_shutdown(void);
 
@@ -68,6 +68,7 @@ static struct {
 /* -- Component helpers -- */
 static void title_set_content(WINDOW * bar_win, const char * title);
 static void info_redraw(WINDOW * info_title, WINDOW * info_window);
+static void status_redraw(WINDOW * status_window, char * input);
  
 static void layout(void)
 {
@@ -101,6 +102,7 @@ static void layout(void)
 	ctx.status = newwin(1, cols, 2 + info_height + timer_height, 0);
     keypad(ctx.status, TRUE);
     nodelay(ctx.status, TRUE); /* set non-blocking */
+	status_redraw(ctx.status, NULL);
 }
 
 static void title_set_content(WINDOW * bar_win, const char * title)
@@ -112,25 +114,48 @@ static void title_set_content(WINDOW * bar_win, const char * title)
 	wnoutrefresh(bar_win);
 }
 
-static void log_draw_all(void)
+static void help_draw_all(WINDOW * info_window)
 {
-	/* Half-placeholder function to get the log scrollback and draw everything */
+	// TODO: Ideally this could be parsed rather than hard-coded
+	char const * help_str = "Press a key to invoke the corresponding command:\n"
+		" > q  --  Quit\n"
+		" > h  --  Show help pane (this!)\n"
+		" > [SPACE]  --  Start / split timer\n\n"
+		"   --  (debug) --\n"
+		" > l  --  Show log output\n"
+		" > [ESC]  --  Log something\n"
+		;
 
-	char ** sb = logging_get_scrollback(-5); // TODO
+    werase(info_window);
+	waddnstr(info_window, help_str, strlen(help_str));
+	wnoutrefresh(info_window);
+}
+
+
+static void log_draw_all(WINDOW * info_window)
+{
+	// char ** sb = logging_get_scrollback(-LINES); // TODO pull this from ctx maybe
+	char ** sb = logging_get_scrollback(-LINES);
 	char * line;
 
-    werase(ctx.info_window);
+    werase(info_window);
 
-	for (int i = 0; i < 5; ++i) {
+	if (!sb) {
+		line = "< Could not get log scrollback >";
+		waddnstr(info_window, line, strlen(line));
+		return;
+	}
+
+	for (int i = 0; i < LINES; ++i) {
 		line = sb[i];
 		if (!line) {
 			break;
 		}
-		waddnstr(ctx.info_window, line, strlen(line));
+		waddnstr(info_window, line, strlen(line));
 	}
 
 	free(sb);
-	wnoutrefresh(ctx.info_window);
+	wnoutrefresh(info_window);
 }
 static void log_append(char * msg, ssize_t len)
 {
@@ -150,22 +175,24 @@ static void info_redraw(WINDOW * info_title, WINDOW * info_window)
 
 	switch (ctx.info_view_setting) {
 		case INFO_VIEW_HELP:
+			help_draw_all(info_window);
+
 			new_title = "HELP";
 			break;
 		case INFO_VIEW_LOG:
-			new_title = "DEBUG LOG";
-
 			scrollok(info_window, TRUE);
 
 			/* TODO: Don't quite love this passing, it's a bit inconsistent
 			 * with what is responsible for triggering the refresh */
-			log_draw_all();
-			// wnoutrefresh(info_window);
+			log_draw_all(info_window);
+
+			new_title = "DEBUG LOG";
 			break;
 		case INFO_VIEW_DEBUG:
 			new_title = "DEBUG INFO";
 			break;
 	}
+	/* ....though, it is consistent with this interface */
 	title_set_content(info_title, new_title);
 }
 
@@ -175,21 +202,78 @@ static void info_redraw(WINDOW * info_title, WINDOW * info_window)
  *
  * Question is if I want this function to do the parsing, or just render
  * whatever I send it. I overthink these questions..... */
-static void status_redraw(char * input)
+static void status_redraw(WINDOW * status_window, char * input)
 {
-    werase(ctx.status);
-    mvwprintw(ctx.status, 0, 0, "KATANA > %s", input ? input : "");
-    wnoutrefresh(ctx.status);
+    werase(status_window);
+    mvwprintw(status_window, 0, 0, "KATANA > %s", input ? input : "");
+    wnoutrefresh(status_window);
 }
 
 /* --- */
 
-static int handle_wake(void) {
-	if (atomic_load(&ctx.active)) {
+static int handle_wake(void)
+{
+	if (!atomic_load(&ctx.active)) {
+		/* Shutdown started */
 		return -1;
 	}
 
+	// NOTE this will become very common but it's weird at the present
 	LOG_DEBUG("UI wake but nothing to do");
+
+	return 0;
+}
+
+/* Return non-zero if the UI should stop */
+static int handle_key(int x)
+{
+	// TODO: This *can't* be permanent
+	static app_cmd_t cmd;
+
+	switch (x) {
+		case KEY_RESIZE:
+			LOG_DEBUG("Invoke layout resize");
+			layout();
+			break;
+
+		case ' ':
+		case '\n':
+		case '\r':
+		case KEY_ENTER:
+			LOG_DEBUG("Invoke split");
+
+			memset(&cmd, 0, sizeof(app_cmd_t));
+			cmd.op = APP_CMD_SPLIT;
+			app_cmd_send_yield(&cmd);
+			break;
+
+		case '\b':
+		case 127:
+		case KEY_BACKSPACE:
+			LOG_DEBUG("Invoke <backspace action>");
+			break;
+
+			
+		case 'h':
+			LOG_DEBUG("Invoke help pane");
+			ctx.info_view_setting = INFO_VIEW_HELP;
+			info_redraw(ctx.info_title, ctx.info_window);
+			break;
+
+		case 'l':
+			LOG_DEBUG("Invoke debug log pane");
+			ctx.info_view_setting = INFO_VIEW_LOG;
+			info_redraw(ctx.info_title, ctx.info_window);
+			break;
+
+		case 'q':
+			LOG_DEBUG("Invoke quit action");
+
+			memset(&cmd, 0, sizeof(app_cmd_t));
+			cmd.op = APP_CMD_QUIT;
+			app_cmd_send_yield(&cmd);
+			return 1;
+	}
 	return 0;
 }
 
@@ -215,9 +299,6 @@ static int tui_init(void)
 	ctx.info_view_setting = INFO_VIEW_LOG; // default for now
 
 	layout();
-	status_redraw(NULL);
-
-	doupdate();
 
 	return 0;
 }
@@ -230,17 +311,22 @@ static int tui_release(void)
 /* NOTE: I'm having a tough time designing the hierarcy of order here.
  * For now, be sure to exit if notify_fd throws an error so we don't listen
  * on a stale FD. That said, I have .run with an fd and yet a dedicated
- * .notify handler, so we could just create and store that internally? */
-static int tui_main(int notify_fd)
+ * .notify handler, so we could just create and store that internally?
+ *
+ * TODO: Not sure what to do with the return value. For now, it'll return the
+ * error code or 0 if everything seemd to run as expected. Entertaining the
+ * idea of returning non-zero if the UI should signal program exit, or perhaps
+ * if the UI should be restarted. (Maybe positive for one, negative for the
+ * other??)
+ */
+static int tui_main(int listen_fd)
 {
-	// ssize_t read_len;
-	// char input;
+	int exit_status = 0;
 	int ready;
-	int status = 0;
 
 	struct pollfd fds[] = {
 		{
-			.fd = notify_fd,
+			.fd = listen_fd,
 			.events = POLLIN // TODO: Investigate canon events for something like this
 		},
 		{
@@ -254,6 +340,8 @@ static int tui_main(int notify_fd)
 	};
 
 	while (true) {
+        doupdate();
+
 		/* --- Blocking --- */
 		if ((ready = poll(fds, 3, -1)) < 0) {
 			if (errno == EINTR) {
@@ -265,7 +353,7 @@ static int tui_main(int notify_fd)
 		/* --- */
 		if (fds[2].revents & (POLLHUP | POLLERR)) {
 			/* Kill the UI if stdin closes or errors, it would be unresponsive */
-			status = errno;
+			exit_status = errno;
 			perror("io");
 			goto shutdown;
 		}
@@ -281,165 +369,68 @@ static int tui_main(int notify_fd)
 		/* Grab any new log output */
 		if (fds[1].revents & POLLIN) {
 			char log_buf[1024];
-			ssize_t len;
-
-			// while ((len = read(fds[1].fd, log_buf, sizeof(log_buf))) > 0) {
-				// waddnstr(ctx.info_window, log_buf, len);
-			// }
-			len = read(fds[1].fd, log_buf, sizeof(log_buf));
+			ssize_t len = read(fds[1].fd, log_buf, sizeof(log_buf));
 			log_append(log_buf, len);
-			// log_draw_all();
+
+			// NOTE / TODO: I could add a status_redraw() here so the cursor
+			// moves back to the bottom. Unimportant for now. See below.
 		}
 
 		/* Read data from stdin */
         int ch;
+		int rval;
         while ((ch = wgetch(ctx.status)) != ERR) {
-            switch (ch) {
-				case KEY_RESIZE:
-					layout();
-					fprintf(stderr, "resize\n");
-					break;
+			rval = handle_key(ch);
+			if (rval) {
+				exit_status = (rval < 0) ? -1 : exit_status;
+				goto shutdown;
+			}
+		}
 
-				case '\n':
-				case '\r':
-				case KEY_ENTER:
-					fprintf(stderr, "newline\n");
-					break;
+		/* TODO: Tentative consdiering for the future making this a timeout poll
+		 * Thus, the timer window and status line would be updated at whatever
+		 * interval the timeout is for the "live" aspect of the timer.
+		 *
+		 * This status_redraw() call works in the meantime to force the cursor
+		 * to the bottom, but it would become even more useful and deliberate
+		 * in this final form, which would display the timer internal state. */
 
-				case '\b':
-				case 127:
-				case KEY_BACKSPACE:
-					fprintf(stderr, "backspace\n");
-					break;
-
-				default:
-					// if (ch >= 32 && ch < 127 && len < sizeof line - 1) {
-						// line[len++] = ch;
-						// line[len] = '\0';
-					// }
-					// char buf[2] = { 0 };
-					// if (ch >= 32 && ch < 127 && len < sizeof line - 1) {
-						// buf[0] = ch;
-						// refresh_input_line(buf);
-					// }
-					break;
-            }
-        }
+		// TODO this is just for debugging
 		char buf[2] = { 0 };
 		if (ch >= 32 && ch < 127) {
 			buf[0] = ch;
 		} else {
 			buf[0] = '\0';
 		}
-		status_redraw(buf); /* AKA _redraw_input */
-        doupdate();
+		/////
 
-		// if (fds[2].revents & POLLIN) {
-			// /* Every UI interaction is 1 byte */
-			// while ((read_len = read(STDIN_FILENO, &input, 1))) {
-				// if (read_len < 0) {
-					// switch (errno) {
-						// default:
-							// perror("read");
-							// fallthrough
-						// case EAGAIN:
-							// TODO: maybe `goto ui_shutdown;`
-							// break;
-
-						// case EINTR:
-							// /* OK - try again */
-							// continue;
-					// }
-					// break; /* inner loop */
-				// }
-				// char buf[2] = { 0 };
-				// buf[0] = input;
-
-				// LOG_INFOF("Received char: %s", buf);
-				// printf("Received char: %s\n", buf);
-				// refresh_input_line(buf); /* AKA _redraw_input */
-				// doupdate();
-			// }
-
-			// if (!read_len) {
-				// /* empty, CTRL-D or something like that */
-				// ui_terminal_step(NULL);
-				// TODO: There's a chance CTRL-Z will kill this maybe?
-
-				// LOG_INFO("Received EOF, exiting UI loop");
-				// break;
-
-				// LOG_INFO("Received EOF");
-				// continue;
-			// }
-		// }
+		status_redraw(ctx.status, buf);
 	}
 
 shutdown:
-	// atomic_store(&shutdown_requested, true);
+	atomic_store(&ctx.active, false);
+
+	/* NOTE: If we get here and the shutdown command has not already been
+	 * invoked, then something went wrong. Thus, we keep running on the chance
+	 * it helps debugging. The general design rule is "all threads will
+	 * continue running until something tells them to stop or they encounter
+	 * an error of their own." Currently, the user pressing Q (or X on gtk) is
+	 * the only such invocation of the the former rule.
+	 *
+	 * TODO: This may prove to be unideal decision. If so, return nonzero and
+	 * defer the app command to the base UI thread. */
+
     endwin();
-	return status;
+	/* ^^ TODO after the UI closes, it might be worthwhile to dump any output
+	 * log back to the terminal. If the scrollback is full, a
+	 *  --- LOG TRUNCATED DURING TUI ---
+	 * line would be acceptable before dumping what remains. */
+
+	return exit_status;
 }
 
 static int tui_shutdown(void)
 {
 	atomic_store(&ctx.active, false);
 	return 0;
-}
-
-// HOlding onto this just until I extract the app_cmd stuff
-static void _old_prompt_logic(void)
-{
-	char buf[16] = { 0 }; // NOTE: would be populated from stdin read
-	size_t len = 16; // NOTE: would be length of populated buffer
-	/* Dispatch every complete line in the buffer. */
-	char * start = buf;
-	char * nl;
-	while ((nl = memchr(start, '\n', (size_t) (buf + len - start)))) {
-		*nl = '\0';
-		/* --- Now `start` holds a NUL-terminated C string */
-		app_cmd_t cmd = {
-			.ts = 0,
-			.buf_len = 0,
-		};
-
-		if (*start == '\0') {
-			cmd.op = APP_CMD_SPLIT;
-			app_cmd_send_yield(&cmd);
-			// sched_yield();
-		}
-		else if (!strcmp(start, "quit")) {
-			cmd.op = APP_CMD_QUIT;
-			app_cmd_send_yield(&cmd);
-
-			// TODO: This is technically optional, this thread does
-			// not need to shut itself down, however, it raises an
-			// important design question!
-			//
-			// If something in the thread loop goes wrong and we exit,
-			// if the thread is the only (perhaps only *main*) method
-			// of shutdown, should this thread exiting mean that the
-			// timer should always follow suit?
-			//
-			// The program can keep timing a run even without a UI,
-			// but very few users will know this and *not* panic about
-			// losing their run.
-
-			// goto ui_shutdown;
-		}
-		else {
-			printf("entered: %s\n", start);
-		}
-
-		/* --- */
-		start = nl + 1;
-	}
-
-	len = (size_t) (buf + len - start);
-	memmove(buf, start, len);
-
-	if (len == sizeof(buf)) {
-		fprintf(stderr, "line too long, discarded\n");
-		len = 0;
-	}
 }

@@ -117,7 +117,7 @@ static inline void _emit_message(char const * const msg)
 			}
 		}
 
-		// printf("Writing at %d: `%s`\n", sb_idx, msg); /// TODO remove
+		// printf("Writing at %d: %s", sb_idx, msg); /// TODO remove after testing
 		memcpy(sb_line_ref, msg, sb_line_len + 1);
 
 		shared_ctx.scrollback[sb_idx] = sb_line_ref;
@@ -600,7 +600,7 @@ void __log_message(char const * fmt, ...)
 char ** logging_get_scrollback(int rel_lines)
 {
 	char ** adjusted_sb;
-	size_t sb_idx;
+	ssize_t sb_idx;
 
 	if (!shared_ctx.scrollback) {
 		return NULL;
@@ -626,9 +626,12 @@ char ** logging_get_scrollback(int rel_lines)
 		rel_lines = -rel_lines;
 		sb_idx = sb_idx % LOG_HIST_LEN;
 	}
+	// printf("needs %d lines, idx: %d\n", rel_lines, shared_ctx.scrollback_idx); /// TODO remove
 	// -- rel_lines asserted positive now
 
-	adjusted_sb = calloc(rel_lines, sizeof(char *));
+	/* +1 is so that the caller can break on NULL whether there's enough lines
+	 * to fill the request or not, else we'd need to report a length */
+	adjusted_sb = calloc(rel_lines + 1, sizeof(char *));
 	ASSERT_ALLOC(adjusted_sb, NULL);
 
 	/* Lock so as not grab a mangled scrollback line pointer or line idx */
