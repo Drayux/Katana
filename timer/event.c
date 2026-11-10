@@ -170,7 +170,7 @@ static void * ipc_server_main(void * arg)
  * NOTE: return value ptr is static memory and thus valid ONLY until
  * app_cmd_poll is called again
  */
-static app_cmd_t * parse_command(char * buf, size_t len)
+static app_cmd_t * read_command(int recv_fd)
 {
 	/* Reads the something when there is something */
 	while (true) {
@@ -208,58 +208,45 @@ static app_cmd_t * parse_command(char * buf, size_t len)
 	return &cmd_buf.t;
 }
 
-static app_cmd_t * handle_pipe_fd(int pipe_fd)
+static app_cmd_t * handle_sock_event(int sock_fd)
 {
-}
+	int client_fd = accept(ipc_server_fd, NULL, NULL);
+	if (client_fd < 0) {
+		perror("accept fail");
+		continue; // do not stop the server on accept errors
+	}
 
-static app_cmd_t * handle_sock_fd(int sock_fd)
-{
+	CTLMessage * msg = NULL;
+	int result = receive_message(client_fd, &msg);
+
+	if (result == 0) {
+		// if (msg->length == sizeof(CTLCommand)) {
+		// TODO: I think I wanted to clean up this a bit to match
+		// more closely with that of app_cmd.
+		// CTLCommand command = *(CTLCommand *) msg->message;
+		// CommandData * cmd_data = g_malloc(sizeof(CommandData));
+		// cmd_data->command = command;
+
+		// Queue command execution on main thread
+		// g_idle_add(execute_command_on_main_thread, cmd_data);
+
+		LOG_DEBUGF("Received data: %d", *((int *) msg->message));
+		// }
+		// else {
+		// LOG_WARNF("Invalid message length: %u (expected %zu)",
+		// msg->length, sizeof(CTLCommand));
+		// }
+		free(msg);
+	}
+	else {
+		LOG_DEBUG("IPC client closed before message completed");
+	}
+
+	close(client_fd);
 }
 
 
 /* --- PUBLIC API --- */
-
-// returns pipe writefd on success, -errno on failure
-// (intended to be fed to ipc_set_send_fd)
-int event_init(void)
-{
-	int rval = -1;
-    int pipe_fds[2];
-	int ipc_server_fd;
-
-	/*
-	 * TODO: This was originally an "emergency thread wake"
-	 * I don't currently have a use for it, but I wanted to hold onto it until
-	 * I assert that I don't need it.
-	 *
-	notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
-    if (notify_fd < 0) {
-		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
-		return NULL;
-	}
-	 */
-
-    if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
-		ctx.pipe_fd = pipe_fds[0];
-		rval = pipe_fds[1];
-	}
-	else {
-		// perror("pipe fail");
-		LOG_FATAL("pipe failed, could not create app event handler");
-		return -errno;
-	}
-
-	ipc_server_fd = ipc_listen();
-	if (ipc_server_fd > STDERR_FILENO) {
-		ctx.sock_fd = ipc_server_fd;
-	}
-	else {
-		/* Not fatal, but likely annoying */
-		LOG_WARN("Failed to create IPC listener, running in standalone mode");
-	}
-
-	return rval;
-}
 
 /* Return value is the command op as an int, 0 if none but OK, negative on
  * failure. Main loop should begin shutdown immediately on the latter.
@@ -329,13 +316,13 @@ int event_poll(app_cmd_t * cmd)
 	}
 	
 	if (fds[0].revents & POLLIN) { /* PIPE */
-		event = handle_pipe_fd(fds[0].fd);
+		event = parse_command(fds[0].fd);
 	}
 	else if (fds[1].revents & POLLIN) { /* IPC SOCK */
-		event = handle_sock_fd(fds[1].fd);
+		event = handle_sock_event(fds[1].fd);
 	}
 
-	/* TODO: aaaa this is not going to work with the dynamic array. I think
+	/* TODO: aaaa this is not going to work with the dynamic struct. I think
 	 * the correct answer is to force a known size maybe? I could also do a
 	 * realloc, but that means that main needs to keep track of how big this
 	 * is and ugh that's a mess. */
@@ -346,6 +333,48 @@ int event_poll(app_cmd_t * cmd)
 	}
 
 	return 0;
+}
+
+// returns pipe writefd on success, -errno on failure
+// (intended to be fed to ipc_set_send_fd)
+int event_init(void)
+{
+	int rval = -1;
+    int pipe_fds[2];
+	int ipc_server_fd;
+
+	/*
+	 * TODO: This was originally an "emergency thread wake"
+	 * I don't currently have a use for it, but I wanted to hold onto it until
+	 * I assert that I don't need it.
+	 *
+	notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
+    if (notify_fd < 0) {
+		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
+		return NULL;
+	}
+	 */
+
+    if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
+		ctx.pipe_fd = pipe_fds[0];
+		rval = pipe_fds[1];
+	}
+	else {
+		// perror("pipe fail");
+		LOG_FATAL("pipe failed, could not create app event handler");
+		return -errno;
+	}
+
+	ipc_server_fd = ipc_listen();
+	if (ipc_server_fd > STDERR_FILENO) {
+		ctx.sock_fd = ipc_server_fd;
+	}
+	else {
+		/* Not fatal, but likely annoying */
+		LOG_WARN("Failed to create IPC listener, running in standalone mode");
+	}
+
+	return rval;
 }
 
 void event_shutdown(void)

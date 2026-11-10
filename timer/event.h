@@ -6,6 +6,6 @@
 // ipc_server.c or.h. I'm experiementing with a rigid header style and this is
 // the result of that.
 
+int event_poll(app_cmd_t * cmd);
 int event_init(void);
 void event_shutdown(void);
-int event_poll(app_cmd_t * cmd);
