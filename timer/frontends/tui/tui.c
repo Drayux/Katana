@@ -224,7 +224,7 @@ static int handle_wake(void)
 	return 0;
 }
 
-/* Return non-zero if the UI should stop */
+/* Return non-zero if the UI should stop (due to an error or user request) */
 static int handle_key(int x)
 {
 	// TODO: This *can't* be permanent
@@ -272,7 +272,15 @@ static int handle_key(int x)
 			memset(&cmd, 0, sizeof(app_cmd_t));
 			cmd.op = APP_CMD_QUIT;
 			app_cmd_send_yield(&cmd);
-			return 1;
+			break;
+
+			/* NOTE / TODO: My original code was to hint to the UI early that
+			 * it should exit. However, it is up to main to determeine if we
+			 * should actually quit when receiving such a command. Thus, the
+			 * UI thread will also be waiting for a formal shutdown
+			 * notification, even if it is responsible for the command being
+			 * received in the first place. */
+			// return 1;
 	}
 	return 0;
 }
@@ -314,7 +322,7 @@ static int tui_release(void)
  * .notify handler, so we could just create and store that internally?
  *
  * TODO: Not sure what to do with the return value. For now, it'll return the
- * error code or 0 if everything seemd to run as expected. Entertaining the
+ * error code or 0 if everything seemed to run as expected. Entertaining the
  * idea of returning non-zero if the UI should signal program exit, or perhaps
  * if the UI should be restarted. (Maybe positive for one, negative for the
  * other??)

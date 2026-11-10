@@ -433,7 +433,7 @@ void logging_shutdown(void)
 /* Start the dedicated log thread. Any messages queued before this will be
  * waiting on the reporter associated with the main thread
  * returns 0 on success (rval of pthread_create) */
-int logging_thread_start(void)
+int logging_consumer_start(void)
 {
 	int rval;
 
@@ -453,7 +453,7 @@ int logging_thread_start(void)
 	return rval;
 }
 
-int logging_thread_stop(void)
+int logging_consumer_stop(void)
 {
 	int rval = 0;
 	if (atomic_load(&shared_ctx.active)) {

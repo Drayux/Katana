@@ -10,7 +10,7 @@ typedef struct {
     int (* stop)(void);
 } frontend_t;
 
-int ui_load(char const * frontend_name);
+int ui_init(char const * frontend_name);
 int ui_thread_start(pthread_t * thread);
 void ui_thread_shutdown(void);
 void ui_notify(void);

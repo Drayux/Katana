@@ -1,7 +1,7 @@
 /** \file ctl.c
  * Implementation of the Libresplitctl executable
  */
-#include "ipc_common.h"
+#include "ipc.h"
 #include "environment.h"
 
 #include <arpa/inet.h>
@@ -48,7 +48,7 @@ bool sendToLibreSplit(CTLCommand const cmd)
 	}
 
 	char socket_path[PATH_MAX];
-	snprintf(socket_path, PATH_MAX, "%s/%s", runtime_dir, LIBRESPLIT_SOCK_NAME);
+	snprintf(socket_path, PATH_MAX, "%s/%s", runtime_dir, KATANA_IPC_PATH);
 
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sockfd == -1) {

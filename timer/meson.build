@@ -82,8 +82,7 @@ sources = files(
     'lasr/settings.c',
     'lasr/utils.c',
 
-    'app_cmd.c',
-    'ipc_server.c',
+    'event.c',
     'ui.c',
     'main.c',
     'runs.c',

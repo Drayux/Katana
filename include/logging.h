@@ -24,8 +24,8 @@
 
 int logging_init(void);
 void logging_shutdown(void);
-int logging_thread_start(void);
-int logging_thread_stop(void); // optional step: keeps log file open
+int logging_consumer_start(void);
+int logging_consumer_stop(void); // optional step: keeps log file open
 void logging_thread_notify(void);
 int logging_add_reporter(char const * friendly_name);
 char ** logging_get_scrollback(int rel_lines);

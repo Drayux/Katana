@@ -76,33 +76,18 @@ static void * ui_main(void * arg)
 
 /* --- UI PUBLIC INTERFACE --- */
 
-int ui_load(char const * frontend_name)
+// TODO: (not ideal to put here but alas) I'm not sure if I want to assert that
+// this was called before calling thread_start or not. It is technically
+// necessary in the current state. Is an extra context var "initialized"
+// worthwhile? Or is this one that we just want to expect the developer to
+// call correctly.
+//
+// Whatever the decision, I want to make it consistent across all the threads
+// (IPC and UI)
+int ui_init(char const * frontend_name)
 {
 	ctx.headless = false;
 	ctx.frontend = frontend_select(frontend_name);
-
-	return ctx.frontend ? 0 : -1;
-}
-
-/*
- * NOTE: Thread object is seperate so the main routine can join multiple
- * threads at once.
- *
- * NOTE pt2: We're assering that thread_start is called before any thread might
- * try to notify it or close it. This is the case for now, but a race condition
- * could arise if that gets changed. */
-int ui_thread_start(pthread_t * thread)
-{
-	int status;
-
-	if (!thread) {
-		LOG_ERR("UI thread is NULL");
-		return -1;
-	}
-	else if (ctx.thread) {
-		LOG_ERR("UI thread already running");
-		return -1;
-	}
 
 	if (!ctx.notify_fd) {
 		ctx.notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
@@ -113,9 +98,39 @@ int ui_thread_start(pthread_t * thread)
 	}
 	
 	pthread_mutex_init(&ctx.lock, NULL);
-	// TODO: Clean this up
-	// ^^ do I want to verify if it's already initialized or not?
-	// ^^ We can probably trust the value of thread that we do check
+
+	return ctx.frontend ? 0 : -1;
+}
+
+/*
+ * NOTE: Thread object is seperate so the main routine can join multiple
+ * threads at once.
+ *
+ * NOTE pt2: We're asserting that thread_start is called before any thread
+ * might try to notify it or close it. This is the case for now, but a race
+ * condition could arise if that gets changed. (Because of the attempt to 
+ * lock the mutex.) */
+int ui_thread_start(pthread_t * thread)
+{
+	int status;
+
+	if (!thread) {
+		LOG_ERR("UI thread is NULL");
+		return -1;
+	}
+	else if (!ctx.notify_fd) {
+		// TODO (see the comment above ui_init)
+		// We technically don't need this much at all, it is possible to run
+		// without UI notify. Do we *want* to support that? I don't think so,
+		// but alas, notify_fd may not be the best indiciator of if the init
+		// method has been called or not.
+		LOG_ERR("UI module not yet initialized");
+		return -1;
+	}
+	else if (ctx.thread) {
+		LOG_ERR("UI thread already running");
+		return -1;
+	}
 
 	status = pthread_create(thread, NULL, &ui_main, NULL);
 	if (!status) {
@@ -125,6 +140,7 @@ int ui_thread_start(pthread_t * thread)
 	return status;
 }
 
+// TODO
 void ui_thread_shutdown(void)
 {
 	// if (!atomic_load(&shutdown_requested)) {

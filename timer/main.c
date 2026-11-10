@@ -1,12 +1,18 @@
 #include "common.h"
 #include "environment.h"
 
-#include "app_cmd.h"
-#include "ipc_server.h"
+#include "event.h"
 #include "ui.h"
 
 #include "plugins/plugin_loading.h"
 #include "plugins/plugin_utils.h"
+
+/*
+ * NOTE for my future self (really not sure where best to place this!)
+ * The source file hierarchy is such that anything at the top-level is an
+ * interface need by or instance hosted by main. Everything else should have
+ * additional non-main logic contained in a subdirectory.
+ */
 
 /**
  * LibreSplit's auto splitter thread.
@@ -46,7 +52,9 @@ int main(int argc, char * argv[])
 	int status = 0; // OK
 	char const * envvar;
 	int sockfd;
-	app_cmd_t * cmd;
+
+	int event_op;
+	app_cmd_t event;
 
 	pthread_t ui_thread;
 	pthread_t ipc_thread;
@@ -78,7 +86,7 @@ int main(int argc, char * argv[])
 	/* Check for IPC socket
 	 * If present, assume that an instance is already open */
 	// TODO: Appears to work; could use more testing.
-	if ((sockfd = ipc_connect()) >= 0) {
+	if ((sockfd = ipc_connect()) > STDERR_FILENO) {
 		close(sockfd);
 		LOG_FATAL(
 			"Katana is already open, and more than one instance introduces "
@@ -90,8 +98,8 @@ int main(int argc, char * argv[])
 	(void) ipc_server_thread_start(&ipc_thread);
 
 	/* Spawn a thread to handle asyncronous log output */
-	LOG_DEBUG("Start logging thread");
-	(void) logging_thread_start();
+	LOG_DEBUG("Start logging consumer thread");
+	(void) logging_consumer_start();
 
 	/* Prepare and register selected plugins */
 	// init_external_lasr_functions();
@@ -103,11 +111,11 @@ int main(int argc, char * argv[])
 
 	/* Spawn the GUI thread */
 	LOG_DEBUG("Start GUI thread");
-	(void) ui_load(NULL); // TODO: sets TUI mode for now
+	(void) ui_init(NULL); // TODO: sets TUI mode for now
 	(void) ui_thread_start(&ui_thread);
 
 	LOG_INFO("Enter main application loop");
-	while ((cmd = app_cmd_poll())) {
+	while ((event_op = app_cmd_poll(&event)) >= 0) {
 
 		/* This portion is still a very rough WIP.
 		 *
@@ -124,9 +132,19 @@ int main(int argc, char * argv[])
 		 * be moving that logic to the main thread, here.
 		 */
 
-		switch (cmd->op) {
+
+		// FOR NEXT TIME!
+		// The mystery pieces are:
+		// - Clean ways to do the refresh rate -- maybe poll with the timeout?
+		// - Handling the unloaded state / how to load splits at all
+		//   ^^ i.e., is it intuitive to have a filepath passed as event data??
+		// - Not a mystery, but recall that the gui trivially can compute what time
+		//   to display every frame
+
+
+		switch (event_op) {
 			default:
-				LOG_ERRORF("Unsupported main loop event: %d", (int) cmd->op);
+				LOG_ERRORF("Unsupported main loop event: %d", event_op);
 				continue;
 
 			case APP_CMD_SCAN:

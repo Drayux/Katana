@@ -2,8 +2,12 @@
 
 #include "logging.h"
 
-#include <errno.h>
-#include <stdlib.h>
+#include <stdlib.h> // For null free
+
+#include <errno.h>  // For set / clear event
+#include <stdint.h> //
+
+typedef unsigned char byte;
 
 /* Cleans up out-of-memory bailout                               */
 #define ASSERT_ALLOC(ptr, rval)                                   \
@@ -32,18 +36,18 @@
         }                                                         \
     } while (0)
 
-/* Cleans up the multitude of eventfd notifications              *
- * This exists because of the strict 8-byte eventfd I/O          */
-// TODO: Considering moving this to ipc_common.h
+/* Cleans up the multitude of eventfd notifications               /
+ * This exists because of the explicit 8-byte eventfd I/O        */
+// TODO: This probably is not the best spot for this
 #define SET_EVENT(fd)                                             \
     do {                                                          \
-        char _wake[8] = { 1 };                                    \
+        uint8_t _wake[8] = { 1 };                                 \
 		(void) !write((fd), _wake, 8);                            \
     } while (0)
 #define CLEAR_EVENT(fd)                                           \
 	do {                                                          \
 		ssize_t _len;                                             \
-		char _buf[8];                                             \
+		uint8_t _buf[8];                                          \
 		while ((_len = read((fd), _buf, 8))) {                    \
 			if (_len < 0) {                                       \
 				if (errno != EAGAIN) {                            \
@@ -57,4 +61,3 @@
 		}                                                         \
 	} while (0)
 
-typedef unsigned char byte;
