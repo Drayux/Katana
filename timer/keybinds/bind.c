@@ -29,7 +29,7 @@
 #include <X11/XKBlib.h>
 #include <X11/Xlib.h>
 #include <gdk/gdk.h>
-#include <gdk/x11/gdkx.h>
+// #include <gdk/x11/gdkx.h>
 #include <gtk/gtk.h>
 
 #include "keybinds/bind.h"
@@ -82,7 +82,7 @@ static gulong xevent_handler_id = 0;
 /* Build a map from X11's real modifier slots to the corresponding
  * Meta, Super, and Hyper modifiers. This replaces the modifier map
  * that GdkKeymap maintained internally in GTK 3.
- */
+ *
 static void update_modmap(Display * xdisplay)
 {
 	static struct {
@@ -137,8 +137,7 @@ static void update_modmap(Display * xdisplay)
 	XkbFreeKeyboard(xkb, XkbAllComponentsMask, TRUE);
 }
 
-/* Add the X11 modifier bits represented by virtual GTK modifiers.
- */
+ * Add the X11 modifier bits represented by virtual GTK modifiers.
 static gboolean map_virtual_modifiers(GdkModifierType * modifiers)
 {
 	GdkModifierType const virtual_modifiers[] = {
@@ -167,10 +166,10 @@ static gboolean map_virtual_modifiers(GdkModifierType * modifiers)
 
 	return success;
 }
-
-/* Add the virtual GTK modifiers represented by X11 modifier bits.
+ *
+ *
+ * Add the virtual GTK modifiers represented by X11 modifier bits.
  * This makes an incoming X event comparable with a GTK accelerator.
- */
 static void add_virtual_modifiers(GdkModifierType * modifiers)
 {
 	guint i;
@@ -189,10 +188,9 @@ static void add_virtual_modifiers(GdkModifierType * modifiers)
 		}
 	}
 }
-
-/* Return the modifier mask that needs to be pressed to produce key in the
+ *
+ * Return the modifier mask that needs to be pressed to produce key in the
  * given group (keyboard layout) and level ("shift level").
- */
 static GdkModifierType FinallyGetModifiersForKeycode(
 	XkbDescPtr xkb, KeyCode key, uint group, uint level)
 {
@@ -206,8 +204,8 @@ static GdkModifierType FinallyGetModifiersForKeycode(
 		return MODIFIERS_ERROR;
 	}
 
-	/* Taken from GDK's MyEnhancedXkbTranslateKeyCode */
-	/* find the offset of the effective group */
+	// Taken from GDK's MyEnhancedXkbTranslateKeyCode
+	// find the offset of the effective group
 	effectiveGroup = group;
 	if (effectiveGroup >= nKeyGroups) {
 		unsigned groupInfo = XkbKeyGroupInfo(xkb, key);
@@ -238,10 +236,9 @@ static GdkModifierType FinallyGetModifiersForKeycode(
 	}
 	return MODIFIERS_NONE;
 }
-
-/* Grab or ungrab the keycode+modifiers combination, first plainly, and then
+ *
+ * Grab or ungrab the keycode+modifiers combination, first plainly, and then
  * including each ignorable modifier in turn.
- */
 static gboolean grab_ungrab_with_ignorable_modifiers(
 	Window rootwin, uint keycode, uint modifiers, gboolean grab)
 {
@@ -250,9 +247,9 @@ static gboolean grab_ungrab_with_ignorable_modifiers(
 	GdkDisplay * display = gdk_display_get_default();
 	Display * xdisplay = gdk_x11_display_get_xdisplay(display);
 
-	/* Ignorable modifiers */
+	// Ignorable modifiers
 	guint mod_masks[] = {
-		0, /* modifier only */
+		0, // modifier only
 		Mod2Mask,
 		GDK_LOCK_MASK,
 		Mod2Mask | GDK_LOCK_MASK,
@@ -273,7 +270,7 @@ static gboolean grab_ungrab_with_ignorable_modifiers(
 	if (gdk_x11_display_error_trap_pop(display)) {
 		TRACE(g_warning("Failed grab/ungrab"));
 		if (grab) {
-			/* On error, immediately release keys again */
+			// On error, immediately release keys again
 			grab_ungrab_with_ignorable_modifiers(
 				rootwin, keycode, modifiers, FALSE);
 		}
@@ -283,11 +280,10 @@ static gboolean grab_ungrab_with_ignorable_modifiers(
 	}
 	return success;
 }
-
-/* Grab or ungrab then keyval and modifiers combination, grabbing all key
+ *
+ * Grab or ungrab then keyval and modifiers combination, grabbing all key
  * combinations yielding the same key values.
  * Includes ignorable modifiers using grab_ungrab_with_ignorable_modifiers.
- */
 static gboolean grab_ungrab(
 	Window rootwin, uint keyval, uint modifiers, gboolean grab)
 {
@@ -314,10 +310,9 @@ static gboolean grab_ungrab(
 	}
 
 	for (k = 0; k < n_keys; k++) {
-		/* NOTE: We only bind for the first group,
+		 * NOTE: We only bind for the first group,
 		 * so regardless of current keyboard layout, it will
 		 * grab the key from the default Layout.
-		 */
 		if (keys[k].group != WE_ONLY_USE_ONE_GROUP) {
 			continue;
 		}
@@ -338,7 +333,7 @@ static gboolean grab_ungrab(
 			success = TRUE;
 		}
 		else {
-			/* When grabbing, break on error */
+			// When grabbing, break on error
 			if (grab && !success) {
 				break;
 			}
@@ -349,21 +344,20 @@ static gboolean grab_ungrab(
 
 	return success;
 }
-
+ *
 static gboolean keyvalues_equal(guint kv1, guint kv2) { return kv1 == kv2; }
-
-/* Compare modifier set equality,
+ *
+ * Compare modifier set equality,
  * while accepting overloaded modifiers (MOD1 and META together)
- */
 static gboolean modifiers_equal(GdkModifierType mf1, GdkModifierType mf2)
 {
 	GdkModifierType ignored = 0;
 
-	/* Accept MOD1 + META as MOD1 */
+	// Accept MOD1 + META as MOD1
 	if (mf1 & mf2 & GDK_ALT_MASK) {
 		ignored |= GDK_META_MASK;
 	}
-	/* Accept SUPER + HYPER as SUPER */
+	// Accept SUPER + HYPER as SUPER
 	if (mf1 & mf2 & GDK_SUPER_MASK) {
 		ignored |= GDK_HYPER_MASK;
 	}
@@ -397,7 +391,7 @@ static gboolean do_grab_key(struct Binding * binding)
 	TRACE(g_print("Grabbing keyval: %u, vmodifiers: 0x%x, name: %s\n", keysym,
 		modifiers, binding->keystring));
 
-	/* Map virtual modifiers to non-virtual modifiers */
+	// Map virtual modifiers to non-virtual modifiers
 	map_virtual_modifiers(&modifiers);
 
 	if (modifiers == binding->modifiers
@@ -406,7 +400,7 @@ static gboolean do_grab_key(struct Binding * binding)
 		return FALSE;
 	}
 
-	success = grab_ungrab(rootwin, keysym, modifiers, TRUE /* grab */);
+	success = grab_ungrab(rootwin, keysym, modifiers, TRUE); // grab
 
 	if (!success) {
 		g_warning("Binding '%s' failed!", binding->keystring);
@@ -428,11 +422,11 @@ static gboolean do_ungrab_key(struct Binding * binding)
 	TRACE(g_print("Ungrabbing keyval: %u, vmodifiers: 0x%x, name: %s\n",
 		binding->keyval, binding->modifiers, binding->keystring));
 
-	/* Map virtual modifiers to non-virtual modifiers */
+	// Map virtual modifiers to non-virtual modifiers
 	modifiers = binding->modifiers;
 	map_virtual_modifiers(&modifiers);
 
-	grab_ungrab(rootwin, binding->keyval, modifiers, FALSE /* ungrab */);
+	grab_ungrab(rootwin, binding->keyval, modifiers, FALSE); // ungrab
 	return TRUE;
 }
 
@@ -469,12 +463,11 @@ static gboolean filter_func(
 				xevent->xkey.keycode, xevent->xkey.state));
 
 			gdk_display_translate_key(display, xevent->xkey.keycode, modifiers,
-				/* See top comment why we don't use this here:
-				XkbGroupForCoreState (xevent->xkey.state)
-				*/
+				// See top comment why we don't use this here:
+				// XkbGroupForCoreState (xevent->xkey.state)
 				WE_ONLY_USE_ONE_GROUP, &keyval, NULL, NULL, &consumed);
 
-			/* Map non-virtual to virtual modifiers */
+			// Map non-virtual to virtual modifiers
 			modifiers &= ~consumed;
 			add_virtual_modifiers(&modifiers);
 			modifiers &= mod_mask;
@@ -489,10 +482,8 @@ static gboolean filter_func(
 			}
 #endif
 
-			/*
 			 * Set the last event time for use when showing
 			 * windows to avoid anti-focus-stealing code.
-			 */
 			processing_event = TRUE;
 			last_event_time = xevent->xkey.time;
 
@@ -501,9 +492,8 @@ static gboolean filter_func(
 			if (!ls_dialog_exists()) {
 				iter = bindings;
 				while (iter != NULL) {
-					/* NOTE: ``iter`` might be removed from the list
-					 * in the callback.
-					 */
+					// NOTE: ``iter`` might be removed from the list
+					// in the callback.
 					struct Binding * binding = iter->data;
 					iter = iter->next;
 
@@ -553,6 +543,7 @@ static void keymap_changed(Display * xdisplay)
 		do_grab_key(binding);
 	}
 }
+ */
 
 /**
  * keybinder_init:
@@ -564,6 +555,7 @@ static void keymap_changed(Display * xdisplay)
  */
 void keybinder_init(void)
 {
+	/*
 	GdkDisplay * display = gdk_display_get_default();
 	if (keybinder_display != NULL || display == NULL) {
 		return;
@@ -583,6 +575,8 @@ void keybinder_init(void)
 	keybinder_display = g_object_ref(display);
 	xevent_handler_id = g_signal_connect_after(display, "xevent",
 		G_CALLBACK(filter_func), GDK_XID_TO_POINTER(rootwin));
+	*/
+	(void) 0;
 }
 
 /**
@@ -590,6 +584,7 @@ void keybinder_init(void)
  */
 void keybinder_dispose(void)
 {
+	/*
 	if (keybinder_display != NULL && xevent_handler_id != 0) {
 		g_signal_handler_disconnect(keybinder_display, xevent_handler_id);
 		xevent_handler_id = 0;
@@ -612,6 +607,9 @@ void keybinder_dispose(void)
 	processing_event = FALSE;
 	last_event_time = 0;
 	xkb_event_type = 0;
+	*/
+
+	(void) 0;
 }
 
 /**
@@ -631,7 +629,8 @@ void keybinder_dispose(void)
 gboolean keybinder_bind(
 	char const * keystring, KeybinderHandler handler, void * user_data)
 {
-	return keybinder_bind_full(keystring, handler, user_data, NULL);
+	// return keybinder_bind_full(keystring, handler, user_data, NULL);
+	return false; 
 }
 
 /**
@@ -653,6 +652,7 @@ gboolean keybinder_bind(
 gboolean keybinder_bind_full(char const * keystring, KeybinderHandler handler,
 	void * user_data, GDestroyNotify notify)
 {
+	/*
 	struct Binding * binding;
 	gboolean success;
 
@@ -662,7 +662,7 @@ gboolean keybinder_bind_full(char const * keystring, KeybinderHandler handler,
 	binding->user_data = user_data;
 	binding->notify = notify;
 
-	/* Sets the binding's keycode and modifiers */
+	// Sets the binding's keycode and modifiers
 	success = do_grab_key(binding);
 
 	if (success) {
@@ -673,6 +673,9 @@ gboolean keybinder_bind_full(char const * keystring, KeybinderHandler handler,
 		g_free(binding);
 	}
 	return success;
+	*/
+
+	return false;
 }
 
 /**
@@ -687,7 +690,7 @@ gboolean keybinder_bind_full(char const * keystring, KeybinderHandler handler,
  */
 void keybinder_unbind(char const * keystring, KeybinderHandler handler)
 {
-
+	/*
 	for (GSList * iter = bindings; iter != NULL; iter = iter->next) {
 		struct Binding * binding = iter->data;
 
@@ -707,6 +710,8 @@ void keybinder_unbind(char const * keystring, KeybinderHandler handler)
 		g_free(binding);
 		break;
 	}
+	*/
+	(void) 0;
 }
 
 /**
@@ -721,7 +726,7 @@ void keybinder_unbind(char const * keystring, KeybinderHandler handler)
  */
 void keybinder_unbind_all(char const * keystring)
 {
-
+	/*
 	for (GSList * iter = bindings; iter != NULL; iter = iter->next) {
 		struct Binding * binding = iter->data;
 
@@ -740,11 +745,13 @@ void keybinder_unbind_all(char const * keystring)
 		g_free(binding->keystring);
 		g_free(binding);
 
-		/* re-start scan from head of new list */
+		// re-start scan from head of new list
 		iter = bindings;
 		if (!iter)
 			break;
 	}
+	*/
+	(void) 0;
 }
 
 /**
@@ -754,10 +761,13 @@ void keybinder_unbind_all(char const * keystring)
  */
 guint32 keybinder_get_current_event_time(void)
 {
+	/*
 	if (processing_event) {
 		return last_event_time;
 	}
 	else {
 		return GDK_CURRENT_TIME;
 	}
+	*/
+	return 0;
 }
