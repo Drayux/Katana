@@ -1,6 +1,6 @@
 #include "ui.h"
 
-#include "app_cmd.h"
+#include "ipc.h"
 #include "frontends/frontends.h"
 
 #include <fcntl.h>

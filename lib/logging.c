@@ -100,9 +100,11 @@ static inline void _emit_message(char const * const msg)
 		if (shared_ctx.scrollback_idx >= 0) {
 			/* Scrollback buffer has looped */
 			if (sb_line_len > strlen(sb_line_ref)) {
+				errno = 0;
 				sb_line_ref = realloc(sb_line_ref, sb_line_len + 1);
 				if (errno) {
 					/* give up if no memory */
+					// Old is still in sb, so it will be freed on normal shutdown
 					fprintf(stderr, "No memory for logger scrollback realloc\n");
 					return;
 				}
@@ -117,7 +119,7 @@ static inline void _emit_message(char const * const msg)
 			}
 		}
 
-		// printf("Writing at %d: %s", sb_idx, msg); /// TODO remove after testing
+		// fprintf(stderr, "line: %lu %p\n", sb_idx, sb_line_ref);
 		memcpy(sb_line_ref, msg, sb_line_len + 1);
 
 		shared_ctx.scrollback[sb_idx] = sb_line_ref;
@@ -327,7 +329,6 @@ int logging_init(void)
 	shared_ctx.reporters = NULL;
 	shared_ctx.logfile = NULL;
 	shared_ctx.scrollback = NULL;
-	shared_ctx.scrollback_idx = -LOG_HIST_LEN;
 
 	int rval = 0;
 	char logfile_path[PATH_MAX + 1] = { 0 };
@@ -372,6 +373,7 @@ int logging_init(void)
 
 #if defined(LOG_HIST_LEN) && (LOG_HIST_LEN > 0)
 	/* Create scrollback buffer (array of char pointers) */
+	shared_ctx.scrollback_idx = -LOG_HIST_LEN;
 	shared_ctx.scrollback = calloc(LOG_HIST_LEN, sizeof(char *));
 	ASSERT_ALLOC(shared_ctx.scrollback, 1);
 #endif
@@ -391,7 +393,7 @@ void logging_shutdown(void)
 	reporter_t * telescope;
 	reporter_t * chopping_block;
 
-	logging_thread_stop();
+	logging_consumer_stop();
 
 	/* Grab exclusive control of the shared context */
 	pthread_mutex_lock(&shared_ctx.lock);
@@ -581,7 +583,7 @@ void __log_message(char const * fmt, ...)
 	else {
 		/* enqueue message in this thread's pipe */
 		// printf("would enqueue %s\n", msg);
-		send_len = write(local_reporter->msg_send, (byte *) msg, msg_len + 1);
+		send_len = write(local_reporter->msg_send, (uint8_t *) msg, msg_len + 1);
 		if (send_len != msg_len + 1) {
 			// TODO: Not yet sure how I want to handle write errors here
 			perror("write fail");

@@ -1,3 +1,9 @@
+/*
+ * This is a many to one model. The main thread is the only receiver.
+ * When it receives a shutdown signal, it will exit its primary loop and
+ * subsequently invoke the shutdown process for its child threads.
+ */
+
 #include "event.h"
 
 #include "environment.h"
@@ -7,7 +13,6 @@
 #include <linux/limits.h>
 #include <poll.h>
 #include <pthread.h>
-#include <sched.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,228 +26,179 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-/*
- * This is a many to one model. The main thread is the only receiver.
- * When it receives a shutdown signal, it will exit its primary loop and
- * subsequently invoke the shutdown process for its child threads.
- */
-// ^^ move this to the main handler function maybe
-
 static struct {
-	int pipe_fd;
-	int sock_fd;
+	int pipe_fd; // listen
+	int sock_fd; // listen
+	int event_fd; // write
 } ctx;
 
-/**
- * Receives a message from the socket.
- *
- * @param sockfd The socket file descriptor.
- * @param out Pointer to the CTLMessage struct used as output.
- *
- * @return Zero if a full message was received, non-zero otherwise.
- */
-static int receive_message(int sockfd, CTLMessage ** out)
+static event_t * read_event(int recv_fd);
+static event_t * read_ipc_msg(int recv_fd);
+static event_t * handle_socket(int sock_fd);
+
+static event_t * read_event(int recv_fd)
 {
-	// Read header (blocking)
-	uint32_t len = 0;
-	ssize_t n = read(sockfd, &len, sizeof(len));
-	if (n == 0)
-		return 1; // client closed connection immediately
-	len = ntohl(len);
-	if (n != sizeof(len))
-		return -1;
+	static event_t ev_buf;
 
-	CTLMessage * msg = malloc(sizeof(CTLMessage) + len);
-	if (!msg) {
-		fprintf(stderr, "Failed to allocate memory for control message.\n");
-		return -1;
-	}
-	msg->length = len;
+	ssize_t bytes_read = 0;
+	ssize_t total_read = 0;
 
-	size_t received = 0;
-	while (received < len) {
-		n = read(sockfd, msg->message + received, len - received);
-		if (n <= 0) {
-			free(msg);
-			return -1;
+	/* TODO: While functional, I don't love that I did this differently than
+	 * the IPC version. This one totals the entire struct, whereas IPC totals
+	 * only the payload. */
+	while (total_read < sizeof(event_t)) {
+		bytes_read = read(recv_fd, (uint8_t *) &ev_buf, sizeof(event_t) - total_read);
+		if (!bytes_read) {
+			LOG_ERROR("Received app event with no data");
+			return NULL;
 		}
-		received += n;
+		else if (bytes_read < 0) {
+			switch (errno) {
+				case EINTR:
+				case EAGAIN:
+					continue;
+			}
+			break;
+		}
+		total_read += bytes_read;
 	}
 
-	*out = msg;
-	return 0;
+	if (total_read != sizeof(event_t)) {
+		LOG_ERRORF("Incomplete event: "
+			"%ld bytes read does not match %ld expected",
+			total_read, sizeof(event_t));
+		ev_buf.payload = NULL; // better to risk a memory leak than a segfault
+		ev_buf.len = -1; // indicates an error occurred
+	}
+
+	return &ev_buf;
 }
 
-/**
- * The remote control server thread.
- *
- * @param arg The arguments to pass to the thread
+/* Read an IPC message from an FD, convert into an event_t. */
+/* 
+ * TODO: This is the method that would detect "status request" commands, which
+ * necessitate a reply. I have not yet decided on this implementation! I think
+ * I'd prefer to have a dedicated "IPC send thread" to which such replies may
+ * be deferred.
  */
-static void * ipc_server_main(void * arg)
+static event_t * read_ipc_msg(int recv_fd)
 {
-	int ipc_server_fd;
-	int ready;
+	static ipc_msg_t cmd_buf;
+	static event_t ev_buf;
 
-	prctl(PR_SET_NAME, "LS CTL Server", 0, 0, 0);
+	uint8_t * payload_buf = NULL;
+	ssize_t payload_len = 0;
 
-	struct pollfd fds[2] = {
-		// {
-			// .fd = notify_fd,
-			// .events = POLLIN
-		// },
-		{
-			.fd = ipc_server_fd,
-			.events = POLLIN | POLLHUP | POLLERR
-		},
-	};
+	ssize_t bytes_read = 0;
+	ssize_t total_read = 0;
 
-	while (1) {
-		ready = poll(fds, 2, -1);
-		if (ready < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			LOG_ERROR("poll error");
-			perror("poll");
-			break;
-		}
-
-		/* Unlike logger thread, prioritize shutdown first */
-		if (fds[0].revents & POLLIN) {
-			/* IPC thread only notified for shutdown */
-			CLEAR_EVENT(fds[0].fd);
-			break;
-		}
-
-		if (fds[1].revents & POLLIN) {
-			int client_fd = accept(ipc_server_fd, NULL, NULL);
-			if (client_fd < 0) {
-				perror("accept fail");
-				continue; // do not stop the server on accept errors
-			}
-
-			CTLMessage * msg = NULL;
-			int result = receive_message(client_fd, &msg);
-
-			if (result == 0) {
-				// if (msg->length == sizeof(CTLCommand)) {
-					// TODO: I think I wanted to clean up this a bit to match
-					// more closely with that of app_cmd.
-					// CTLCommand command = *(CTLCommand *) msg->message;
-					// CommandData * cmd_data = g_malloc(sizeof(CommandData));
-					// cmd_data->command = command;
-
-					// Queue command execution on main thread
-					// g_idle_add(execute_command_on_main_thread, cmd_data);
-
-					LOG_DEBUGF("Received data: %d", *((int *) msg->message));
-				// }
-				// else {
-					// LOG_WARNF("Invalid message length: %u (expected %zu)",
-						// msg->length, sizeof(CTLCommand));
-				// }
-				free(msg);
-			}
-			else {
-				LOG_DEBUG("IPC client closed before message completed");
-			}
-
-			close(client_fd);
-		}
-		else if (fds[1].revents & (POLLHUP | POLLERR)) {
-			LOG_ERROR("IPC socket failure (TODO not sure what all could happen here)");
-			break;
-		}
+	bytes_read = read(recv_fd, (uint8_t *) &cmd_buf, sizeof(ipc_msg_t));
+	if (!bytes_read) {
+		/* connection closed immediately */
+		LOG_DEBUG("File closed before read");
+		return NULL;
 	}
-
-	LOG_INFO("IPC server thread exiting");
-    if (notify_fd > STDERR_FILENO) {
-		close(notify_fd);
-	}
-    if (ipc_server_fd > STDERR_FILENO) {
-		close(ipc_server_fd);
-	}
-
-	return NULL;
-}
-
-/*
- * NOTE: return value ptr is static memory and thus valid ONLY until
- * app_cmd_poll is called again
- */
-static app_cmd_t * read_command(int recv_fd)
-{
-	/* Reads the something when there is something */
-	while (true) {
-		len = read(event.readfd, cmd_buf.b, sizeof(cmd_buf.b));
-		if (len < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			if (errno == EAGAIN) {
-				/* Pipe was empty, try again from the start */
+	else if (bytes_read < 0) {
+		switch (errno) {
+			case EINTR:
+			case EAGAIN:
+				/* Try again */
 				// TOOD: Hopefully this becomes a stack-friendly tail recursion
-				return app_cmd_poll();
-			}
-			perror("read");
-			return NULL; // TODO: maybe `goto shutdown` instead?
+				return read_ipc_msg(recv_fd);
 		}
-		else if (len == 0) {
-			printf("read 0 bytes\n");
-			perror("read");
-			return NULL; // TODO: maybe `goto shutdown` instead?
+		// perror("read");
+		LOG_DEBUG("Unexpected error during IPC read");
+		return NULL;
+	}
+
+	payload_len = (ssize_t) ntohs(cmd_buf.len);
+
+	do {
+		if (!payload_len) {
+			break;
+		}
+		else if (payload_len > KATANA_IPC_MAX_PAYLOAD) {
+			LOG_WARNF("IPC reported payload %ld exceeds maximum %u",
+				payload_len, KATANA_IPC_MAX_PAYLOAD);
+			payload_len = -1;
+			break;
 		}
 
-		// Assert the number of bytes read
-		if (len != sizeof(app_cmd_t) + cmd_buf.t.buf_len) {
-			LOG_ERRORF(
-				"Invalid cmd read len: %d read does not match %u reported",
-				len - sizeof(app_cmd_t),
-				cmd_buf.t.buf_len
-			);
+		payload_buf = malloc(payload_len);
+		if (!payload_buf) {
+			LOG_ERROR("No memory for IPC payload");
+			break;
 		}
-		// loop is only here so we can try again if interrupted
-		break;
+
+		while (total_read < payload_len) {
+			// TODO: I probably want the same error checking above?
+			bytes_read = read(recv_fd, payload_buf, payload_len - total_read);
+			if (!bytes_read) {
+				break; // inner
+			}
+			else if (bytes_read < 0) {
+				switch (errno) {
+					case EINTR:
+					case EAGAIN:
+						continue;
+				}
+				break; // inner
+			}
+			total_read += bytes_read;
+		}
 	}
-	
-	return &cmd_buf.t;
+	while (false);
+
+	if (total_read != payload_len) {
+		LOG_WARNF("Incomplete IPC message: "
+			"%ld bytes read does not match %ld expected",
+			total_read, payload_len);
+		free(payload_buf);
+		payload_buf = NULL;
+		payload_len = -1; // indicates an error occurred
+	}
+
+	// ev_buf.timestamp = ntohll(cmd_buf.ts); // TODO!!!
+	ev_buf.timestamp = cmd_buf.ts;
+	ev_buf.opcode = ntohs(cmd_buf.op);
+	ev_buf.len = payload_len;
+	ev_buf.payload = payload_buf; // NULL OK; event_poll caller releases
+
+	LOG_DEBUGF("New event received: %s (%ld bytes)",
+		app_cmd_to_str(ev_buf.opcode), payload_len);
+
+	return &ev_buf;
 }
 
-static app_cmd_t * handle_sock_event(int sock_fd)
+/* Accepts a connection and passes it to the command handler */
+static event_t * handle_socket(int sock_fd)
 {
-	int client_fd = accept(ipc_server_fd, NULL, NULL);
-	if (client_fd < 0) {
-		perror("accept fail");
-		continue; // do not stop the server on accept errors
+	int client_fd;
+	event_t * rval;
+
+	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
+		if (client_fd < 0) {
+			// perror("accept fail");
+			LOG_ERROR("Failed accept incoming IPC conenction");
+		}
+		else {
+			LOG_ERROR("Invalid IPC client fd during accept");
+		}
+		return NULL;
 	}
 
-	CTLMessage * msg = NULL;
-	int result = receive_message(client_fd, &msg);
-
-	if (result == 0) {
-		// if (msg->length == sizeof(CTLCommand)) {
-		// TODO: I think I wanted to clean up this a bit to match
-		// more closely with that of app_cmd.
-		// CTLCommand command = *(CTLCommand *) msg->message;
-		// CommandData * cmd_data = g_malloc(sizeof(CommandData));
-		// cmd_data->command = command;
-
-		// Queue command execution on main thread
-		// g_idle_add(execute_command_on_main_thread, cmd_data);
-
-		LOG_DEBUGF("Received data: %d", *((int *) msg->message));
-		// }
-		// else {
-		// LOG_WARNF("Invalid message length: %u (expected %zu)",
-		// msg->length, sizeof(CTLCommand));
-		// }
-		free(msg);
+	rval = read_ipc_msg(client_fd);
+	
+	/* TODO: Not sure if I want this permanently, but helpful for debug */
+	// NOTE: We are assuming that one IPC client fd sends exactly one command!
+	char x;
+	if (read(client_fd, &x, 1) > 0) {
+		LOG_WARN("IPC message exceeds reported length");
 	}
-	else {
-		LOG_DEBUG("IPC client closed before message completed");
-	}
+	/* --- */
 
 	close(client_fd);
+	return rval;
 }
 
 
@@ -253,14 +209,13 @@ static app_cmd_t * handle_sock_event(int sock_fd)
  * Former two can have any number of stages defined by the app itself (aka the
  * confirm save / confirm reload type of logic should not be handled here.`
  * This only provides the raw command.) */
-int event_poll(app_cmd_t * cmd)
+int event_poll(event_t * ev_out)
 {
+	event_t * ev_ref = NULL;
 	int status = 0;
-	int ready;
-	ssize_t len;
-	app_cmd_t event;
 
-	// TODO: Do I want to assert that init was called? (Further refer to ui.c)
+	int ready;
+	char * socket_path;
 
 	struct pollfd fds[] = {
 		{
@@ -276,12 +231,12 @@ int event_poll(app_cmd_t * cmd)
 			// .events = POLLIN | POLLERR /* | POLLNVAL */
 		// },
 	};
-	int num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
+	int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
 
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
 	// autosplitter setting
-	while((ready = poll(&fds, num_fds, -1))) {
+	while((ready = poll(fds, num_fds, -1))) {
 		if (ready < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -292,7 +247,7 @@ int event_poll(app_cmd_t * cmd)
 			LOG_WARN("Poll error on IPC socket, closing");
 
 			// TODO: Another spot to consider the fd race condition
-			// TODO pt2: Same logic as shutdown, maybe consolidate
+			// TODO pt2: Same logic as shutdown function, maybe consolidate
 			close(ctx.sock_fd);
 			ctx.sock_fd = -1;
 			if ((socket_path = ipc_get_socket_path())) {
@@ -307,7 +262,7 @@ int event_poll(app_cmd_t * cmd)
 			break;
 		}
 
-		// poll() did not complete successfully
+		/* poll() did not complete successfully */
 		status = -errno;
 
 		// perror("poll fail");
@@ -315,31 +270,66 @@ int event_poll(app_cmd_t * cmd)
 		return status;
 	}
 	
-	if (fds[0].revents & POLLIN) { /* PIPE */
-		event = parse_command(fds[0].fd);
+	if (fds[1].revents & POLLIN) { /* IPC SOCK */
+		LOG_DEBUG("IPC socket ready");
+		ev_ref = handle_socket(fds[1].fd);
 	}
-	else if (fds[1].revents & POLLIN) { /* IPC SOCK */
-		event = handle_sock_event(fds[1].fd);
+	else if (fds[0].revents & POLLIN) { /* PIPE */
+		LOG_DEBUG("Event pipe ready");
+		ev_ref = read_event(fds[0].fd);
 	}
 
-	/* TODO: aaaa this is not going to work with the dynamic struct. I think
-	 * the correct answer is to force a known size maybe? I could also do a
-	 * realloc, but that means that main needs to keep track of how big this
-	 * is and ugh that's a mess. */
-	if (event) {
-		// memcpy(cmd, event, sizeof(app_cmd_t) + event->buf_len);
-		memcpy(cmd, event, sizeof(app_cmd_t)); // partial for now, see above
-		return (int) event->op;
+	if (ev_ref) {
+		memcpy(ev_out, ev_ref, sizeof(event_t));
+		return (int) ev_ref->opcode;
+	}
+
+	return (int) APP_CMD_SCAN; // 0
+}
+
+/* TODO: I copied most of this from ipc:write_all (static as of writing this.)
+ * I haven't decided if and how I'd like to consolodate these, if at all. */
+int event_send(event_t * ev, bool try_again)
+{
+	const size_t bytes_expected = sizeof(event_t);
+	ssize_t bytes_sent = 0;
+
+	/* Unless we're blocked, only make one write attempt --
+	 * Events on the internal pipe should not be partial
+	 * (TODO: How to better force this?) */
+	// do {
+		// if (bytes_sent < 0) {
+			// if (errno == EAGAIN) {
+				// break;
+			// }
+			// else if (errno == EINTR) {
+				// /* Always try again if interrupted */
+				// continue;
+			// }
+			// return -errno;
+		// }
+		// break;
+	// } while (true);
+
+	LOG_DEBUG("About to write event..."); // TODO remove this
+	bytes_sent = write(ctx.event_fd, (uint8_t *) ev, bytes_expected);
+	LOG_DEBUGF("Sent %lu bytes", bytes_sent);
+
+	if (bytes_sent != bytes_expected) {
+		LOG_ERROR("Incomplete event write");
+		return 1;
 	}
 
 	return 0;
 }
 
-// returns pipe writefd on success, -errno on failure
-// (intended to be fed to ipc_set_send_fd)
+/* Prepare event handler loop --
+ * Returns 0 on success, -errno on failure
+ *
+ * NOTE: Event needs no mutex because it is intended to be released in main
+ * after the slave threads are joined */
 int event_init(void)
 {
-	int rval = -1;
     int pipe_fds[2];
 	int ipc_server_fd;
 
@@ -357,7 +347,7 @@ int event_init(void)
 
     if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
 		ctx.pipe_fd = pipe_fds[0];
-		rval = pipe_fds[1];
+		ctx.event_fd = pipe_fds[1];
 	}
 	else {
 		// perror("pipe fail");
@@ -370,11 +360,11 @@ int event_init(void)
 		ctx.sock_fd = ipc_server_fd;
 	}
 	else {
-		/* Not fatal, but likely annoying */
 		LOG_WARN("Failed to create IPC listener, running in standalone mode");
+		return 1; // non-fatal error
 	}
 
-	return rval;
+	return 0;
 }
 
 void event_shutdown(void)
@@ -383,10 +373,6 @@ void event_shutdown(void)
 
 	// SET_EVENT(notify_fd);
 
-	// TODO: Consider protecting this with a mutex like we have for other 
-	// file descriptors. The challenge is that I want to avoid threads blocking
-	// because the send call is wrapped in a mutex block, just for this close
-	// routine.
 	if (ctx.sock_fd > STDERR_FILENO) {
 		close(ctx.sock_fd);
 		ctx.sock_fd = -1;
@@ -397,8 +383,10 @@ void event_shutdown(void)
 		}
 	}
 
-	/* NOTE: The write end still needs to be closed by whatever holds it. */
-	if (ctx.pipe_fd > STDERR_FILENO) {
+	if (ctx.pipe_fd > STDERR_FILENO) { // read end
 		close(ctx.pipe_fd);
+	}
+	if (ctx.event_fd > STDERR_FILENO) { // write end
+		close(ctx.event_fd);
 	}
 }

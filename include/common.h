@@ -7,7 +7,8 @@
 #include <errno.h>  // For set / clear event
 #include <stdint.h> //
 
-typedef unsigned char byte;
+/* Since opted to prefer uint8_t */
+// typedef unsigned char byte;
 
 /* Cleans up out-of-memory bailout                               */
 #define ASSERT_ALLOC(ptr, rval)                                   \

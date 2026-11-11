@@ -51,13 +51,12 @@ int main(int argc, char * argv[])
 {
 	int status = 0; // OK
 	char const * envvar;
-	int sockfd;
+	int ipc_sock_fd;
 
 	int event_op;
-	app_cmd_t event;
+	event_t event;
 
 	pthread_t ui_thread;
-	pthread_t ipc_thread;
 
 	logging_init();
 	LOG_INFOF("Welcome to Katana timer, version %s", APP_VERSION);
@@ -83,19 +82,16 @@ int main(int argc, char * argv[])
 	// conditionally bypassed
 	check_directories();
 
-	/* Check for IPC socket
+	/* Check for an existing IPC socket --
 	 * If present, assume that an instance is already open */
-	// TODO: Appears to work; could use more testing.
-	if ((sockfd = ipc_connect()) > STDERR_FILENO) {
-		close(sockfd);
+	// (void) ipc_init(); // TODO
+	if ((ipc_sock_fd = ipc_connect()) > STDERR_FILENO) {
+		close(ipc_sock_fd);
 		LOG_FATAL(
 			"Katana is already open, and more than one instance introduces "
-			"a lot of bugs that you don't want to deal with. Exiting."
-		);
+			"a lot of bugs that you don't want to deal with. Exiting.");
 		return 1;
 	}
-	LOG_DEBUG("Start IPC server thread");
-	(void) ipc_server_thread_start(&ipc_thread);
 
 	/* Spawn a thread to handle asyncronous log output */
 	LOG_DEBUG("Start logging consumer thread");
@@ -105,32 +101,17 @@ int main(int argc, char * argv[])
 	// init_external_lasr_functions();
 	// init_timer_registries();
 	// load_plugins();
-	// pthread_t t1; // Auto-splitter thread
-	// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
-	// pthread_join(t1, NULL);
+
+	(void) event_init(); // TODO check errors
 
 	/* Spawn the GUI thread */
 	LOG_DEBUG("Start GUI thread");
 	(void) ui_init(NULL); // TODO: sets TUI mode for now
+						  // (waiting for settings/cli opts implementation)
 	(void) ui_thread_start(&ui_thread);
 
 	LOG_INFO("Enter main application loop");
-	while ((event_op = app_cmd_poll(&event)) >= 0) {
-
-		/* This portion is still a very rough WIP.
-		 *
-		 * Ultimately, the core timer is just a simple state machine, it needs
-		 * no incremental stepping. Thus, the direction I'm heading is a new
-		 * timer which is just that: a singleton state machine.
-		 *
-		 * To handle various thread inputs to the timer (i.e. GUI key event,
-		 * IPC socket, autosplitter, plugin, etc., instead of locking the
-		 * timer in a mutex or polling every thread individually, any thread
-		 * with an event ready need just trigger a shared pipe.
-		 *
-		 * Because of the potenial made available with the lua runtime, I will
-		 * be moving that logic to the main thread, here.
-		 */
+	while ((event_op = event_poll(&event)) >= 0) {
 
 
 		// FOR NEXT TIME!
@@ -162,23 +143,26 @@ int main(int argc, char * argv[])
 				goto shutdown;
 		}
 
+		// (placeholder, moved from OG main)
+		// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
+
 		// TODO: Maybe a temporary interface, shows the TUI prompt for now
 		// ALSO: It doesn't want to "work" more than once??
 		ui_notify();
+
+		// TODO: NULL_FREE(event->payload);
+		LOG_DEBUG("Bottom of main loop"); // TODO remove this
 	}
 
 shutdown:
 	LOG_DEBUG("Leave main application loop");
 
-	// TODO: Close the FDs for the app_cmd pipe
-
-	/* Trigger other threads to stop */
-	ipc_server_thread_shutdown();
+	/* Wait for joinable threads */
 	ui_thread_shutdown();
-
 	pthread_join(ui_thread, NULL);
-	pthread_join(ipc_thread, NULL);
 
+	/* Sequentially shutdown components with open files */
+	event_shutdown();
 	logging_shutdown();
 
 	return status;

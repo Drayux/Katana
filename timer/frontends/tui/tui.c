@@ -1,6 +1,6 @@
 #include "common.h"
 
-#include "app_cmd.h"
+#include "event.h"
 #include "ui.h"
 
 #include <curses.h>
@@ -227,8 +227,7 @@ static int handle_wake(void)
 /* Return non-zero if the UI should stop (due to an error or user request) */
 static int handle_key(int x)
 {
-	// TODO: This *can't* be permanent
-	static app_cmd_t cmd;
+	event_t ev = { 0 }; // TODO
 
 	switch (x) {
 		case KEY_RESIZE:
@@ -242,9 +241,8 @@ static int handle_key(int x)
 		case KEY_ENTER:
 			LOG_DEBUG("Invoke split");
 
-			memset(&cmd, 0, sizeof(app_cmd_t));
-			cmd.op = APP_CMD_SPLIT;
-			app_cmd_send_yield(&cmd);
+			ev.opcode = APP_CMD_SPLIT;
+			event_send(&ev, true);
 			break;
 
 		case '\b':
@@ -269,9 +267,8 @@ static int handle_key(int x)
 		case 'q':
 			LOG_DEBUG("Invoke quit action");
 
-			memset(&cmd, 0, sizeof(app_cmd_t));
-			cmd.op = APP_CMD_QUIT;
-			app_cmd_send_yield(&cmd);
+			ev.opcode = APP_CMD_QUIT;
+			event_send(&ev, true);
 			break;
 
 			/* NOTE / TODO: My original code was to hint to the UI early that

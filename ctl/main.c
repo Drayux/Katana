@@ -32,6 +32,8 @@ void print_help(void)
 	printf("  help          - Show this help message\n");
 }
 
+typedef int CTLCommand;
+
 /**
  * Sends a command to LibreSplit via Unix Socket.
  *
@@ -40,54 +42,54 @@ void print_help(void)
  */
 bool sendToLibreSplit(CTLCommand const cmd)
 {
-	char runtime_dir[PATH_MAX - 17];
-	getXDGruntimeDir(runtime_dir, sizeof(runtime_dir));
-	if (strlen(runtime_dir) == 0) {
-		fprintf(stderr, "Failed to get LibreSplit socket path.\n");
-		return false;
-	}
+	// char runtime_dir[PATH_MAX - 17];
+	// getXDGruntimeDir(runtime_dir, sizeof(runtime_dir));
+	// if (strlen(runtime_dir) == 0) {
+		// fprintf(stderr, "Failed to get LibreSplit socket path.\n");
+		// return false;
+	// }
 
-	char socket_path[PATH_MAX];
-	snprintf(socket_path, PATH_MAX, "%s/%s", runtime_dir, KATANA_IPC_PATH);
+	// char socket_path[PATH_MAX];
+	// snprintf(socket_path, PATH_MAX, "%s/%s", runtime_dir, KATANA_IPC_PATH);
 
-	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (sockfd == -1) {
-		perror("socket fail");
-		return false;
-	}
+	// int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	// if (sockfd == -1) {
+		// perror("socket fail");
+		// return false;
+	// }
 
-	struct sockaddr_un addr = {0};
-	memset(&addr, 0, sizeof(struct sockaddr_un));
-	addr.sun_family = AF_UNIX;
-	strcpy(addr.sun_path, socket_path);
+	// struct sockaddr_un addr = {0};
+	// memset(&addr, 0, sizeof(struct sockaddr_un));
+	// addr.sun_family = AF_UNIX;
+	// strcpy(addr.sun_path, socket_path);
 
-	if (connect(sockfd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-		perror("Failed to connect to LibreSplit socket");
-		close(sockfd);
-		return false;
-	}
+	// if (connect(sockfd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+		// perror("Failed to connect to LibreSplit socket");
+		// close(sockfd);
+		// return false;
+	// }
 
 	// We can send arbitrarily long messages, but for now we only need to send a
 	// single byte Could be useful for future extensions though
-	CTLMessage * ctl_msg =
-		(CTLMessage *) malloc(sizeof(CTLMessage) + sizeof(cmd));
-	if (!ctl_msg) {
-		fprintf(stderr, "Failed to allocate memory for control message.\n");
-		close(sockfd);
-		return false;
-	}
-	ctl_msg->length = htonl(sizeof(cmd));
-	memcpy(ctl_msg->message, &cmd, sizeof(cmd));
+	// CTLMessage * ctl_msg =
+		// (CTLMessage *) malloc(sizeof(CTLMessage) + sizeof(cmd));
+	// if (!ctl_msg) {
+		// fprintf(stderr, "Failed to allocate memory for control message.\n");
+		// close(sockfd);
+		// return false;
+	// }
+	// ctl_msg->length = htonl(sizeof(cmd));
+	// memcpy(ctl_msg->message, &cmd, sizeof(cmd));
 
-	int written = write(sockfd, ctl_msg, sizeof(CTLMessage) + sizeof(cmd));
-	if (written != sizeof(CTLMessage) + sizeof(cmd)) {
-		fprintf(stderr, "Failed to send command to LibreSplit.\n");
-		close(sockfd);
-		free(ctl_msg);
-		return false;
-	}
-	free(ctl_msg);
-	close(sockfd);
+	// int written = write(sockfd, ctl_msg, sizeof(CTLMessage) + sizeof(cmd));
+	// if (written != sizeof(CTLMessage) + sizeof(cmd)) {
+		// fprintf(stderr, "Failed to send command to LibreSplit.\n");
+		// close(sockfd);
+		// free(ctl_msg);
+		// return false;
+	// }
+	// free(ctl_msg);
+	// close(sockfd);
 
 	return true;
 }
@@ -113,22 +115,22 @@ int main(int argc, char * argv[])
 	bool success = false;
 
 	if (strcmp(cmd, "startorsplit") == 0) {
-		success = sendToLibreSplit(CTL_CMD_START_SPLIT);
+		success = sendToLibreSplit(APP_CMD_SPLIT);
 	}
 	else if (strcmp(cmd, "stoporreset") == 0) {
-		success = sendToLibreSplit(CTL_CMD_STOP_RESET);
+		success = sendToLibreSplit(APP_CMD_LOAD);
 	}
 	else if (strcmp(cmd, "cancel") == 0) {
-		success = sendToLibreSplit(CTL_CMD_CANCEL);
+		success = sendToLibreSplit(APP_CMD_STOP);
 	}
 	else if (strcmp(cmd, "unsplit") == 0) {
-		success = sendToLibreSplit(CTL_CMD_UNSPLIT);
+		success = sendToLibreSplit(APP_CMD_UNDO);
 	}
 	else if (strcmp(cmd, "skipsplit") == 0) {
-		success = sendToLibreSplit(CTL_CMD_SKIP);
+		success = sendToLibreSplit(APP_CMD_SKIP);
 	}
 	else if (strcmp(cmd, "exit") == 0) {
-		success = sendToLibreSplit(CTL_CMD_EXIT);
+		success = sendToLibreSplit(APP_CMD_QUIT);
 	}
 	else {
 		fprintf(stderr, "Unknown command: %s\n", cmd);

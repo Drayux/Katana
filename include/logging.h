@@ -30,7 +30,7 @@ void logging_thread_notify(void);
 int logging_add_reporter(char const * friendly_name);
 char ** logging_get_scrollback(int rel_lines);
 
-/* not indended to be called directly, prefer the logger macros */
+/* Not intended to be called directly, prefer the macros below */
 void __log_message(char const * fmt, ...);
 /* --- */
 
