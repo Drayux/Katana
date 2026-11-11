@@ -324,23 +324,23 @@ static int tui_release(void)
  * if the UI should be restarted. (Maybe positive for one, negative for the
  * other??)
  */
-static int tui_main(int listen_fd)
+static int tui_main(int notify_fd)
 {
 	int exit_status = 0;
 	int ready;
 
 	struct pollfd fds[] = {
 		{
-			.fd = listen_fd,
+			.fd = STDIN_FILENO,
+			.events = POLLIN | POLLHUP | POLLERR
+		},
+		{
+			.fd = notify_fd,
 			.events = POLLIN // TODO: Investigate canon events for something like this
 		},
 		{
 			.fd = ctx.stderr_pipe[0],
 			.events = POLLIN
-		},
-		{
-			.fd = STDIN_FILENO,
-			.events = POLLIN | POLLHUP | POLLERR
 		},
 	};
 
@@ -356,7 +356,7 @@ static int tui_main(int listen_fd)
 			goto shutdown;
 		}
 		/* --- */
-		if (fds[2].revents & (POLLHUP | POLLERR)) {
+		if (fds[0].revents & (POLLHUP | POLLERR)) {
 			/* Kill the UI if stdin closes or errors, it would be unresponsive */
 			exit_status = errno;
 			perror("io");
@@ -364,17 +364,17 @@ static int tui_main(int listen_fd)
 		}
 
 		/* Check for a wakeup event (not stdin) */
-		if (fds[0].revents & POLLIN) {
-			CLEAR_EVENT(fds[0].fd);
+		if (fds[1].revents & POLLIN) {
+			CLEAR_EVENT(fds[1].fd);
 			if (handle_wake() < 0) {
 				goto shutdown;
 			}
 		}
 
 		/* Grab any new log output */
-		if (fds[1].revents & POLLIN) {
+		if (fds[2].revents & POLLIN) {
 			char log_buf[1024];
-			ssize_t len = read(fds[1].fd, log_buf, sizeof(log_buf));
+			ssize_t len = read(fds[2].fd, log_buf, sizeof(log_buf));
 			log_append(log_buf, len);
 
 			// NOTE / TODO: I could add a status_redraw() here so the cursor
@@ -437,5 +437,5 @@ shutdown:
 static int tui_shutdown(void)
 {
 	atomic_store(&ctx.active, false);
-	return 0;
+	return 1;
 }

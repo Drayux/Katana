@@ -231,7 +231,8 @@ int event_poll(event_t * ev_out)
 			// .events = POLLIN | POLLERR /* | POLLNVAL */
 		// },
 	};
-	int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
+	// int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
+	int const num_fds = 1;
 
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
@@ -311,9 +312,8 @@ int event_send(event_t * ev, bool try_again)
 		// break;
 	// } while (true);
 
-	LOG_DEBUG("About to write event..."); // TODO remove this
 	bytes_sent = write(ctx.event_fd, (uint8_t *) ev, bytes_expected);
-	LOG_DEBUGF("Sent %lu bytes", bytes_sent);
+	LOG_DEBUGF("Sent %lu bytes", bytes_sent); // TODO remove this maybe
 
 	if (bytes_sent != bytes_expected) {
 		LOG_ERROR("Incomplete event write");

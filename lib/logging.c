@@ -205,7 +205,7 @@ static void * log_consumer_loop(void * arg)
 
 	logging_add_reporter("logger");
 
-	while (1) {
+	while (true) {
 		memset(fds + 1, 0, (fds_len - 1) * sizeof(struct pollfd));
 		fd_count = 1;
 
@@ -217,6 +217,7 @@ static void * log_consumer_loop(void * arg)
 					fds_len_new = fds_len * 2;
 					fds_new = realloc(fds, fds_len_new * sizeof(struct pollfd));
 					if (!fds_new) {
+						// TODO: I don't believe this is reachable
 						LOG_ERROR("no memory for fds realloc");
 						break; // inner loop
 					}
@@ -261,6 +262,12 @@ static void * log_consumer_loop(void * arg)
 					err_msg = "pollfd returned error";
 					goto consumer_exit;
 				}
+
+				// TODO for tomorrow
+				// I think the bug with log lines being dropped is that a single
+				// reporter's pipe backs up, and we only emit the first LOG_LINE_LEN
+				// bytes of it. Revise this to have a delimiter character, and
+				// then seek the output to that delimiter.
 
 				msg_len = read(fds[fd_idx].fd, msg, sizeof(msg) - 1);
 				if (msg_len < 0) {

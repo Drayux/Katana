@@ -86,18 +86,18 @@ static void * ui_main(void * arg)
 // (IPC and UI)
 int ui_init(char const * frontend_name)
 {
+	pthread_mutex_init(&ctx.lock, NULL);
+
 	ctx.headless = false;
 	ctx.frontend = frontend_select(frontend_name);
 
-	if (!ctx.notify_fd) {
+	if (ctx.frontend && !ctx.notify_fd) {
 		ctx.notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
 		if (ctx.notify_fd < 0) {
 			LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
 			return -1;
 		}
 	}
-	
-	pthread_mutex_init(&ctx.lock, NULL);
 
 	return ctx.frontend ? 0 : -1;
 }
@@ -140,21 +140,21 @@ int ui_thread_start(pthread_t * thread)
 	return status;
 }
 
-// TODO
 void ui_thread_shutdown(void)
 {
-	// if (!atomic_load(&shutdown_requested)) {
-		// atomic_store(&shutdown_requested, true);
+	int status = 1; // notify by default if no handler
+	if (ctx.frontend->stop) {
+		status = ctx.frontend->stop();
+	}
 
-		// TODO: Possible resource race condition, this could be called after
-		// the UI thread starts shutting itself down (from the handler loop.)
-		// - < User sends `quit` >
-		// - Enter this if-block
-		// - Other thread wakes to receive `quit`
-		// - Other thread breaks, closes pipe FD
-		// - This thread resumes, calls notify on closed FD
+	if (status > 0) {
+		// TODO consider looping on stop if positive; don't have a use case yet
 		ui_notify();
-	// }
+	}
+	else if (status < 0) {
+		// TODO pthread_cancel()
+		(void) 0;
+	}
 }
 
 void ui_notify(void)

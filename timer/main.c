@@ -129,17 +129,21 @@ int main(int argc, char * argv[])
 				continue;
 
 			case APP_CMD_SCAN:
-				// TODO: try to resolve a command from the autosplitter
+				LOG_INFO("Receive scan");
+				/* TODO: try to resolve a command from the autosplitter */
 				break;
 			case APP_CMD_SPLIT:
-				LOG_INFO("TIMER SPLIT LET's GOOOO");
+				LOG_INFO("Receive split");
 				break;
 			case APP_CMD_STOP:
+				LOG_INFO("Receive stop");
 				break;
 			case APP_CMD_LOAD:
+				LOG_INFO("Receive load");
 				break;
 
 			case APP_CMD_QUIT:
+				LOG_INFO("Receive quit");
 				goto shutdown;
 		}
 
@@ -151,7 +155,6 @@ int main(int argc, char * argv[])
 		ui_notify();
 
 		// TODO: NULL_FREE(event->payload);
-		LOG_DEBUG("Bottom of main loop"); // TODO remove this
 	}
 
 shutdown:
