@@ -45,7 +45,8 @@ struct _reporter_typedef {
 static struct {
 	pthread_t logging_thread;
 	pthread_mutex_t lock; // lock when modifying or traversing the reporters list
-	atomic_bool active; // dedicated logger thread is running
+	atomic_bool active; // async logic ready (else, log actions should block)
+	atomic_bool pending; // a thread was created that must be joined
 	reporter_t * reporters; // Linked list, always ends in an "empty" tail
 	FILE * logfile;
 	char ** scrollback;
@@ -193,6 +194,11 @@ static void * log_consumer_loop(void * arg)
 	/* Store what went wrong if we need to shut down early */
 	char const * err_msg = NULL;
 
+	/* Normally operating, the consumer thread should have near exclusive
+	 * control over the internal state. Exceptions are for adding a reporter,
+	 * or borrowing the scrollback buffer. This "excessive" lock is to
+	 * prioritize the consumer thread, yielding only between the completion of
+	 * a message. (I'm a bit indifferent about this... TODO?) */
 	pthread_mutex_lock(&shared_ctx.lock);
 
 	/* set up a notify fd pipe -- always the first fd in the list */
@@ -204,6 +210,7 @@ static void * log_consumer_loop(void * arg)
 	fds->events = POLLIN;
 
 	logging_add_reporter("logger");
+	atomic_store(&shared_ctx.active, true);
 
 	while (true) {
 		memset(fds + 1, 0, (fds_len - 1) * sizeof(struct pollfd));
@@ -215,10 +222,10 @@ static void * log_consumer_loop(void * arg)
 				/* dynamic realloc if necessary (should be rare) */
 				if (fd_count >= fds_len) {
 					fds_len_new = fds_len * 2;
+					errno = 0;
 					fds_new = realloc(fds, fds_len_new * sizeof(struct pollfd));
-					if (!fds_new) {
-						// TODO: I don't believe this is reachable
-						LOG_ERROR("no memory for fds realloc");
+					if (errno) {
+						LOG_ERROR("no memory for fds realloc"); // OG still valid
 						break; // inner loop
 					}
 					memset(fds_new + fd_count, 0,
@@ -237,10 +244,6 @@ static void * log_consumer_loop(void * arg)
 			telescope = telescope->next;
 		}
 
-		/* TODO: I'm indifferent about this implementation.
-		 * The main idea is "let the consumer hold the lock the entire time
-		 * that it's alive. But, if I have an odd thread without a reporter, I
-		 * might as well let it emit while this thread is waiting. */ 
 		pthread_mutex_unlock(&shared_ctx.lock);
 		//
 		ready = poll(fds, fd_count, -1);
@@ -253,12 +256,11 @@ static void * log_consumer_loop(void * arg)
 			goto consumer_exit;
 		}
 
-		/* TODO: I'm not sure if this dumps everything or not. While that many
-		 * messages piling up is a concern of its own, if it does not, said
-		 * piled messages would be dropped */
 		for (fd_idx = 1; fd_idx < fd_count; ++fd_idx) {
 			if (fds[fd_idx].revents != 0) {
 				if (!(fds[fd_idx].revents & POLLIN)) {
+					/* TODO: Instead of exiting, track which reporter errored
+					 * and set it's fd to -1 so it's skipped later on. */
 					err_msg = "pollfd returned error";
 					goto consumer_exit;
 				}
@@ -272,8 +274,7 @@ static void * log_consumer_loop(void * arg)
 				msg_len = read(fds[fd_idx].fd, msg, sizeof(msg) - 1);
 				if (msg_len < 0) {
 					/* read error */
-					// TODO: Consider setting msg_recv to 0 on this
-					// occurance so we can keep going otherwise
+					/* same TODO as above ^^ */
 					err_msg = "read pipe fail";
 					goto consumer_exit;
 				}
@@ -283,20 +284,25 @@ static void * log_consumer_loop(void * arg)
 			}
 		}
 
+		/* exit the consumer thread once notify fd has an event */
 		if (fds[0].revents & POLLIN) {
-			/* wake requested */
 			CLEAR_EVENT(fds[0].fd);
-			if (!atomic_load(&shared_ctx.active)) {
-				goto consumer_exit;
-			}
+			goto consumer_exit;
+		}
+		else if (fds[0].revents & (POLLHUP | POLLERR)) {
+			err_msg = "notify fd read error";
+			goto consumer_exit;
 		}
 	}
 
 consumer_exit:
-	/* NOTE: Technically possible for this thread to error at the same time
-	 * that we might (incorrectly) call start. This is gracefully ignored as
-	 * this thread is guaranteed to exit by this point (will not be joined.) */
 	atomic_store(&shared_ctx.active, false);
+
+	/* ^^ Logging events will again be blocking and write directly to the
+	 * log file and stderr.
+	 * NOTE: It is possible that a thread logs at the same time an error occurs
+	 * and the message is dropped. This is acceptable because such a failure is
+	 * already an exceptional condition. */
 
 	if (err_msg) {
 		LOG_ERRORF("logger: %s", err_msg);
@@ -307,7 +313,7 @@ consumer_exit:
 	if (shared_ctx.notify_fd > STDERR_FILENO) {
 		close(shared_ctx.notify_fd);
 	}
-	shared_ctx.notify_fd = 0; /* unset the field, we know it's never stdin */
+	shared_ctx.notify_fd = -1;
 
 	pthread_mutex_unlock(&shared_ctx.lock);
 	return NULL;
@@ -317,13 +323,27 @@ consumer_exit:
 /* --- PUBLIC INTERFACES --- */
 
 /**
- * Initializes the log queue, ready to receive messages
+ * Initializes the log queue, ready to receive messages. Call before adding any
+ * thread as a logging reporter.
  * 
  * @return 0 on success
+ * TODO: Non-zero error statuses
  */
 int logging_init(void)
 {
+	int rval = 0;
+
+	char logfile_path[PATH_MAX + 1] = { 0 };
+	char const * xdgdata_path;
 	pthread_mutexattr_t lock_attr;
+
+	prctl(PR_SET_NAME, "Katana Logger", 0, 0, 0);
+
+	shared_ctx.reporters = NULL;
+	shared_ctx.logfile = NULL;
+	shared_ctx.scrollback = NULL;
+	atomic_store(&shared_ctx.active, false);
+	atomic_store(&shared_ctx.pending, false);
 
 	/* Recursive lock allows the logger thread to log itself during shutdown */
     pthread_mutexattr_init(&lock_attr);
@@ -331,59 +351,41 @@ int logging_init(void)
 	pthread_mutex_init(&shared_ctx.lock, &lock_attr);
     pthread_mutexattr_destroy(&lock_attr);
 
-	atomic_store(&shared_ctx.active, false);
-
-	shared_ctx.reporters = NULL;
-	shared_ctx.logfile = NULL;
-	shared_ctx.scrollback = NULL;
-
-	int rval = 0;
-	char logfile_path[PATH_MAX + 1] = { 0 };
-	char const * xdgdata_path;
-
-	prctl(PR_SET_NAME, "Katana Logger", 0, 0, 0);
-
 	/* -- Open log file -- */
 	xdgdata_path = get_libresplit_data_folder_path();
-	if (xdgdata_path) {
-		strncpy(logfile_path, xdgdata_path, sizeof(logfile_path));
-		free((void *) xdgdata_path); // TODO: This is dubiously typed
-
-		/* This will fill up to data_path[PATH_MAX] with path bytes (leaves the
-		 * NUL byte at the end.) We know the path is was truncated if
-		 * data_path[PATH_MAX] is not also a NUL byte. */
-		strncat(logfile_path, "/katana.log",
-			sizeof(logfile_path) - strlen(logfile_path) - 1);
-	}
-	else {
+	if (!xdgdata_path) {
 		perror("Failed to determine log file directory");
 		rval = 1;
 	}
-
-	if (rval == 0 && strlen(logfile_path) >= PATH_MAX) {
-		fprintf(stderr, "Invalid log file directory (too long)");
-		rval = 1;
-	}
 	else {
-		shared_ctx.logfile = fopen(logfile_path, "a");
-	}
+		strncpy(logfile_path, xdgdata_path, sizeof(logfile_path));
+		free((void *) xdgdata_path); // TODO: This is dubiously typed
 
-	if (!shared_ctx.logfile) {
-		perror("fopen fail");
-		rval = 1;
+		/* Fills data_path up to PATH_MAX bytes (leaves NUL byte at the end.)
+		 * Path was truncated if data_path[PATH_MAX] is not also a NUL byte. */
+		strncat(logfile_path, "/katana.log",
+			sizeof(logfile_path) - strlen(logfile_path) - 1);
+
+		if (strlen(logfile_path) >= PATH_MAX) {
+			fprintf(stderr, "Invalid log file directory (too long)");
+			rval = 1;
+		}
+		else if (!(shared_ctx.logfile = fopen(logfile_path, "a"))) {
+			perror("fopen fail");
+			rval = 1;
+		}
 	}
 
 	/* -- Main thread needs a reporter -- */
-	if (logging_add_reporter("main")) {
-		rval = 1;
-	}
+	rval = logging_add_reporter("main") ? 1 : rval;
 
+	/* Create scrollback buffer (if indicated) */
 #if defined(LOG_HIST_LEN) && (LOG_HIST_LEN > 0)
-	/* Create scrollback buffer (array of char pointers) */
 	shared_ctx.scrollback_idx = -LOG_HIST_LEN;
-	shared_ctx.scrollback = calloc(LOG_HIST_LEN, sizeof(char *));
+	shared_ctx.scrollback = calloc(LOG_HIST_LEN, sizeof(char *)); /* outer layer of 2D array */
 	ASSERT_ALLOC(shared_ctx.scrollback, 1);
 #endif
+
 	return rval;
 }
 
@@ -399,30 +401,24 @@ void logging_shutdown(void)
 	FILE * logfile_ref;
 	reporter_t * telescope;
 	reporter_t * chopping_block;
+	char ** scrollback_ref;
 
 	logging_consumer_stop();
 
-	/* Grab exclusive control of the shared context */
-	pthread_mutex_lock(&shared_ctx.lock);
-	telescope = shared_ctx.reporters;
-	shared_ctx.reporters = NULL;
+	/* Clean up log file */
 	logfile_ref = shared_ctx.logfile;
 	shared_ctx.logfile = NULL;
-	pthread_mutex_unlock(&shared_ctx.lock);
-	// TODO: If it's safe to assume no threads are calling LOG_x by this point,
-	// perhaps I do not need to lock this above at all.
-	pthread_mutex_destroy(&shared_ctx.lock);
-
-	/* Any stray thread will only emit to stderr, now.
-	 * This *shouldn't* happen, but it is not undefined behavior. */
 
 	if (logfile_ref) {
 		fclose(logfile_ref);
 	}
 
-	/* Clean up reporters */
-	// NOTE: Do not use NULL_FREE here! This would invoke LOG_x *after*
-	// shutdown has started.
+	/* Clean up reporters --
+	 * NOTE: Do not use NULL_FREE here! This would invoke LOG_x *after*
+	 * shutdown has started. */
+	telescope = shared_ctx.reporters;
+	shared_ctx.reporters = NULL;
+
 	while (telescope) {
 		chopping_block = telescope;
 		if (chopping_block->msg_recv > STDERR_FILENO) {
@@ -437,6 +433,19 @@ void logging_shutdown(void)
 		telescope = chopping_block->next;
 		free(chopping_block);
 	}
+
+	/* Clean up scrollback */
+	scrollback_ref = shared_ctx.scrollback;
+	shared_ctx.scrollback = NULL;
+
+	if (scrollback_ref) {
+		for (int idx = 0; idx < LOG_HIST_LEN; ++idx) {
+			/* Every entry is asserted a valid allocation or NULL */
+			NULL_FREE(scrollback_ref[idx]);
+		}
+	}
+
+	pthread_mutex_destroy(&shared_ctx.lock);
 }
 
 /* Start the dedicated log thread. Any messages queued before this will be
@@ -446,10 +455,9 @@ int logging_consumer_start(void)
 {
 	int rval;
 
-	if (atomic_load(&shared_ctx.active)) {
+	if (atomic_exchange(&shared_ctx.pending, true)) {
 		/* Thread already running -- start/stop should only be called from the
-		 * main thread. If this is upheld, we won't ever race to restart before
-		 * the previous thread exits. (pthread_join in the stop routine.) */
+		 * main thread. */
 		return -1;
 	}
 
@@ -457,7 +465,8 @@ int logging_consumer_start(void)
 		&shared_ctx.logging_thread, NULL,
 		&log_consumer_loop, NULL);
 	if (!rval) {
-		atomic_store(&shared_ctx.active, true);
+		LOG_ERROR("pthread_create fail: logging will be synchronous");
+		atomic_store(&shared_ctx.pending, false);
 	}
 	return rval;
 }
@@ -465,12 +474,12 @@ int logging_consumer_start(void)
 int logging_consumer_stop(void)
 {
 	int rval = 0;
-	if (atomic_load(&shared_ctx.active)) {
-		atomic_store(&shared_ctx.active, false);
+
+	if (atomic_load(&shared_ctx.pending)) {
 		logging_thread_notify();
 
 		rval = pthread_join(shared_ctx.logging_thread, NULL);
-		/* any threads trying to log but blocked during shutdown will wake now */
+		atomic_store(&shared_ctx.pending, false);
 	}
 	return rval;
 }
@@ -532,70 +541,6 @@ int logging_add_reporter(char const * friendly_name)
 	logging_thread_notify(); /* If the logger is running, it is polling on the
 								previous set of reporters and won't see this. */
 	return 0;
-}
-
-/**
- * Underlying function to all the LOG_* macros
- *
- * Works as a producer.
- *
- * @param[in] fmt The message to print in the log or the format string
- */
-void __log_message(char const * fmt, ...)
-{
-	va_list args;
-
-	char msg[LOG_LINE_LEN] = { 0 };
-	size_t msg_len;
-	ssize_t send_len;
-
-	char thread[LOG_THREAD_LEN];
-	size_t thread_len;
-	size_t max_thread_len; // only calculated if needed
-
-	time_t current_time = time(NULL);
-	struct tm * ts = localtime(&current_time);
-
-	/* Format the log message */
-	msg_len = strftime(msg, sizeof(msg), "%Y-%m-%d %H:%M:%S | ", ts);
-
-	if (local_reporter && local_reporter->name) {
-		thread_len = snprintf(thread, sizeof(thread), "<%s> ", local_reporter->name);
-		if (thread_len >= sizeof(thread)) {
-			max_thread_len = sizeof(thread) - strlen("<..> ") - 1;
-			thread[0] = '<';
-			strncpy(thread + 1, local_reporter->name, max_thread_len);
-			strcpy(thread + 1 + max_thread_len, "..> ");
-		}
-		strncpy(msg + msg_len, thread, sizeof(msg) - msg_len - 1);
-		msg_len = strlen(msg);
-	}
-
-	va_start(args, fmt);
-	vsnprintf(msg + msg_len, sizeof(msg) - msg_len - 1, fmt, args);
-	msg_len = strlen(msg);
-	va_end(args);
-
-	/* Enqueue or direct emit */
-	if ( (0)
-		|| !local_reporter /* pre-init log message */
-		|| local_reporter->msg_send == 0 /* reporter closed */
-		|| !atomic_load(&shared_ctx.active) /* logging thread shutting down */
-	) {
-		/* block until closed, then emit directly to stderr */
-		pthread_mutex_lock(&shared_ctx.lock);
-		_emit_message(msg);
-		pthread_mutex_unlock(&shared_ctx.lock);
-	}
-	else {
-		/* enqueue message in this thread's pipe */
-		// printf("would enqueue %s\n", msg);
-		send_len = write(local_reporter->msg_send, (uint8_t *) msg, msg_len + 1);
-		if (send_len != msg_len + 1) {
-			// TODO: Not yet sure how I want to handle write errors here
-			perror("write fail");
-		}
-	}
 }
 
 /*
@@ -670,4 +615,68 @@ char ** logging_get_scrollback(int rel_lines)
 	// that implemented here, in that case.)
 
 	return adjusted_sb;
+}
+
+/**
+ * Underlying function to all the LOG_* macros
+ *
+ * Works as a producer.
+ *
+ * @param[in] fmt The message to print in the log or the format string
+ */
+void __log_message(char const * fmt, ...)
+{
+	va_list args;
+
+	char msg[LOG_LINE_LEN] = { 0 };
+	size_t msg_len;
+	ssize_t send_len;
+
+	char thread[LOG_THREAD_LEN];
+	size_t thread_len;
+	size_t max_thread_len; // only calculated if needed
+
+	time_t current_time = time(NULL);
+	struct tm * ts = localtime(&current_time);
+
+	/* Format the log message */
+	msg_len = strftime(msg, sizeof(msg), "%Y-%m-%d %H:%M:%S | ", ts);
+
+	if (local_reporter && local_reporter->name) {
+		thread_len = snprintf(thread, sizeof(thread), "<%s> ", local_reporter->name);
+		if (thread_len >= sizeof(thread)) {
+			max_thread_len = sizeof(thread) - strlen("<..> ") - 1;
+			thread[0] = '<';
+			strncpy(thread + 1, local_reporter->name, max_thread_len);
+			strcpy(thread + 1 + max_thread_len, "..> ");
+		}
+		strncpy(msg + msg_len, thread, sizeof(msg) - msg_len - 1);
+		msg_len = strlen(msg);
+	}
+
+	va_start(args, fmt);
+	vsnprintf(msg + msg_len, sizeof(msg) - msg_len - 1, fmt, args);
+	msg_len = strlen(msg);
+	va_end(args);
+
+	/* Enqueue or direct emit */
+	if ((0)
+		|| !local_reporter /* pre-init log message */
+		|| local_reporter->msg_send <= STDERR_FILENO /* reporter closed */
+		|| !atomic_load(&shared_ctx.active) /* logging thread shutting down */
+	) {
+		/* block until closed, then emit directly to stderr */
+		pthread_mutex_lock(&shared_ctx.lock);
+		_emit_message(msg);
+		pthread_mutex_unlock(&shared_ctx.lock);
+	}
+	else {
+		/* enqueue message in this thread's pipe */
+		// printf("would enqueue %s\n", msg);
+		send_len = write(local_reporter->msg_send, (uint8_t *) msg, msg_len + 1);
+		if (send_len != msg_len + 1) {
+			// TODO: Not yet sure how I want to handle write errors here
+			perror("write fail");
+		}
+	}
 }
