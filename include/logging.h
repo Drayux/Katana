@@ -26,9 +26,9 @@ int logging_init(void);
 void logging_shutdown(void);
 int logging_consumer_start(void);
 int logging_consumer_stop(void); // optional step: keeps log file open
-void logging_thread_notify(void);
 int logging_add_reporter(char const * friendly_name);
-char ** logging_get_scrollback(int rel_lines);
+char ** logging_ref_scrollback(int rel_lines);
+void logging_unref_scrollback(char *** scrollback); // ref to array of strings
 
 /* Not intended to be called directly, prefer the macros below */
 void __log_message(char const * fmt, ...);

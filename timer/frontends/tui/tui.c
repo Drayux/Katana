@@ -134,8 +134,7 @@ static void help_draw_all(WINDOW * info_window)
 
 static void log_draw_all(WINDOW * info_window)
 {
-	// char ** sb = logging_get_scrollback(-LINES); // TODO pull this from ctx maybe
-	char ** sb = logging_get_scrollback(-LINES);
+	char ** sb = logging_ref_scrollback(-LINES); // TODO pull this from ctx maybe
 	char * line;
 
     werase(info_window);
@@ -143,6 +142,7 @@ static void log_draw_all(WINDOW * info_window)
 	if (!sb) {
 		line = "< Could not get log scrollback >";
 		waddnstr(info_window, line, strlen(line));
+		// internal mutex was not locked
 		return;
 	}
 
@@ -154,7 +154,7 @@ static void log_draw_all(WINDOW * info_window)
 		waddnstr(info_window, line, strlen(line));
 	}
 
-	free(sb);
+	logging_unref_scrollback(&sb);
 	wnoutrefresh(info_window);
 }
 static void log_append(char * msg, ssize_t len)
