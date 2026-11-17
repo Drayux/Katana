@@ -279,7 +279,7 @@ static void * log_consumer_loop(void * arg)
 				if (!(fds[fd_idx].revents & POLLIN)) {
 					/* TODO: Instead of exiting, track which reporter errored
 					 * and set it's fd to -1 so it's skipped later on. */
-					err_msg = "pollfd returned error";
+					err_msg = "reporter fd error";
 					goto consumer_exit;
 				}
 
@@ -310,7 +310,7 @@ static void * log_consumer_loop(void * arg)
 			}
 		}
 		else if (fds[0].revents & (POLLHUP | POLLERR)) {
-			err_msg = "notify fd read error";
+			err_msg = "notify fd error";
 			goto consumer_exit;
 		}
 	}
@@ -431,6 +431,17 @@ void logging_shutdown(void)
 		fclose(logfile_ref);
 	}
 
+	/* Clean up scrollback */
+	scrollback_ref = log_ctx.scrollback;
+	log_ctx.scrollback = NULL;
+
+	if (scrollback_ref) {
+		for (int idx = 0; idx < LOG_HIST_LEN; ++idx) {
+			/* Every entry is asserted a valid allocation or NULL */
+			NULL_FREE(scrollback_ref[idx]);
+		}
+	}
+
 	/* Clean up reporters --
 	 * NOTE: Do not use NULL_FREE here! This would invoke LOG_x *after*
 	 * shutdown has started. */
@@ -450,17 +461,6 @@ void logging_shutdown(void)
 		}
 		telescope = chopping_block->next;
 		free(chopping_block);
-	}
-
-	/* Clean up scrollback */
-	scrollback_ref = log_ctx.scrollback;
-	log_ctx.scrollback = NULL;
-
-	if (scrollback_ref) {
-		for (int idx = 0; idx < LOG_HIST_LEN; ++idx) {
-			/* Every entry is asserted a valid allocation or NULL */
-			NULL_FREE(scrollback_ref[idx]);
-		}
 	}
 
 	pthread_mutex_destroy(&log_ctx.lock);
@@ -659,18 +659,24 @@ char ** logging_ref_scrollback(int rel_lines)
 
 	// Slow version to assure correctness (TODO: remove once tested)
 	// for (int i = 0; i < rel_lines; ++i) {
-		// adjusted_sb[i] = shared_ctx.scrollback[(sb_idx + i) % LOG_HIST_LEN];
+		// adjusted_sb[i] = log_ctx.scrollback[(sb_idx + i) % LOG_HIST_LEN];
 		// if (adjusted_sb[i] == NULL) {
 			// break;
 		// }
 	// }
+
 	if (sb_idx + rel_lines > LOG_HIST_LEN) {
 		size_t lines_to_end = LOG_HIST_LEN - sb_idx;
-		memcpy(adjusted_sb, log_ctx.scrollback + sb_idx, lines_to_end);
-		memcpy(adjusted_sb + lines_to_end, log_ctx.scrollback, rel_lines - lines_to_end);
+		/* oldest requested message -> end of SB circular buffer */
+		memcpy(adjusted_sb, log_ctx.scrollback + sb_idx,
+			lines_to_end * sizeof(char *));
+		/* start of SB circular buffer -> newest requested message */
+		memcpy(adjusted_sb + lines_to_end, log_ctx.scrollback,
+			(rel_lines - lines_to_end) * sizeof(char *));
 	}
 	else {
-		memcpy(adjusted_sb, log_ctx.scrollback + sb_idx, rel_lines);
+		memcpy(adjusted_sb, log_ctx.scrollback + sb_idx,
+			rel_lines * sizeof(char *));
 	}
 
 	return adjusted_sb;
