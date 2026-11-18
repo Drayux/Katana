@@ -18,6 +18,8 @@ typedef struct {
  * operations asserted safe in this case. */
 typedef int (* io_handler_t) (char const * const msg, size_t len);
 
+io_buf_t * io_buf_init(size_t const capacity);
+
 /* Returns number of left-over bytes, thus a "complete" read is 0; negative on
  * failure.
  *
@@ -30,16 +32,7 @@ int io_read_delim(int recv_fd, char * delim, io_buf_t * buf, io_handler_t on_msg
 // TODO: Consider a io_read_delim_all version of the above ^^
 
 int io_write(int send_fd, io_buf * const buf, io_handler_t on_success, io_handler_t on_fail);
-// TODO: Consider a version with try_again on errno == EAGAIN
 
 /* Alias of io_write_buf that creates an io_buf on the stack, if msg_len is 0,
  * it will be assumed NUL-terminated. */
-int io_write_msg(int send_fd, char const * const msg, size_t len, bool try_again);
-
-io_buf_t * io_buf_create(size_t const capacity);
-void io_buf_destroy(io_buf_t ** buf_ref);
-
-	// if (scrollback_ref && *scrollback_ref) {
-		// free(*scrollback_ref);
-		// *scrollback_ref = NULL;
-	// }
+int io_write_msg(int send_fd, char const * msg, size_t len, bool try_again);

@@ -15,9 +15,7 @@
 static int send_fd = 0;
 
 /* NOTE: All host -> network conversions happen here, NOT BEFORE!
- * Katana should trust the values of this at any point outside this function.
- *
- * Return is the same as write_all ^^ */
+ * Katana should trust the values of this at any point outside this function. */
 int ipc_send(ipc_msg_t * msg, bool try_again)
 {
 	int status;

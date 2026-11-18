@@ -1,5 +1,29 @@
 #include "io_common.h"
 
+#include <sched.h>
+#include <string.h>
+#include <unistd.h>
+
+io_buf_t * io_buf_init(size_t const capacity)
+{
+	void * new;
+	io_buf_t rval;
+
+	if (!capacity) {
+		return NULL;
+	}
+
+	new = malloc(sizeof(io_buf_t) + capacity);
+	ASSERT_ALLOC(new, NULL);
+
+	memcpy(new, &capacity, sizeof(size_t));
+
+	rval = (io_buf_t *) new;
+	rval->filled = 0;
+
+	return rval;
+}
+
 /* Returns 0 on success, 1 if not sent but no on_fail handler
  * - Caller asserts send_fd is valid
  * - ~~Caller asserts buf is non-NULL~~
@@ -90,4 +114,60 @@ int io_write(int send_fd, io_buf * buf,
 	}
 
 	return buf->filled;
+}
+
+/* io_write would be more than suitable for handling this logic as an alias.
+ * That said, it is common that writes are simply a static string and require
+ * no additional complexity. Thus, this is a bit of mostly repeated logic for
+ * the benefit of a write routine that consumes no additional memory from the
+ * side of the program.
+ *
+ * - Assumes msg is NUL-terminated, caller to assert this
+ * - Caller should enclose this in a mutex when multiple threads might write
+ *   to the same send_fd and strlen(msg) > IO_BLOCK_SIZE
+ *
+ * Returns number of bytes left to write (aka 0 on success, positive on err)
+ * */
+int io_write_msg(int send_fd, char const * msg, bool try_again)
+{
+	size_t const total_len = msg ? strlen(msg) + 1 : 0;
+	ssize_t send_len;
+
+	ssize_t total_sent = 0;
+	ssize_t bytes_sent = 0;
+
+	if (!total_len) {
+		return 0;
+	}
+
+	while (total_sent < total_len) {
+		send_len = (buf->filled - total_sent) > IO_BLOCK_SIZE ?
+			IO_BLOCK_SIZE : (buf->filled - total_sent);
+		//
+		bytes_sent = write(send_fd, msg, total_len - total_sent);
+
+		if (bytes_sent < 0) {
+			if (errno == EINTR) {
+				/* Always try again if interrupted */
+				continue;
+			}
+
+			if (errno != EAGAIN) {
+				LOG_ERRORF("write fail: %s", strerror(errno));
+			}
+			else if (try_again) {
+				/* Send fd is blocked by internal mutex */
+				sched_yield();
+				continue;
+			}
+
+			return total_len - total_sent;
+		}
+
+		/* Successful write call */
+		total_sent += bytes_sent;
+		msg += bytes_sent;
+	}
+
+	return 0;
 }

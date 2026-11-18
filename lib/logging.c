@@ -7,6 +7,7 @@
 #include "logging.h"
 
 #include "environment.h"
+#include "io_common.h"
 
 #include <fcntl.h>
 #include <linux/limits.h>
@@ -197,6 +198,9 @@ void _thread_notify(bool shutdown)
 
 /**
  * Log consumer thread: writes the queued messages in the log.
+ *
+ * TODO: I think the assert_alloc_goto nested log statements  will be dropped
+ * because active is true at the time of error.
  */
 static void * log_consumer_loop(void * arg)
 {
@@ -217,6 +221,10 @@ static void * log_consumer_loop(void * arg)
 
 	/* Store what went wrong if we need to shut down early */
 	char const * err_msg = NULL;
+
+	/* Static so that emitting does not consume additional memory */
+	static io_buf_t line_buf = io_buf_init(LOG_LINE_LEN);
+	ASSERT_ALLOC_GOTO(line_buf, consumer_exit);
 
 	logging_add_reporter("logger"); // self
 
@@ -328,8 +336,12 @@ consumer_exit:
 	if (err_msg) {
 		LOG_ERRORF("logger: %s", err_msg);
 	}
-	LOG_INFO("Logging thread exiting");
+	else {
+		LOG_INFO("Logging thread exiting");
+	}
+
 	NULL_FREE(fds);
+	NULL_FREE(line_buf);
 
 	return NULL;
 }
@@ -714,7 +726,7 @@ void __log_message(char const * fmt, ...)
 
 	char msg[LOG_LINE_LEN] = { 0 };
 	size_t msg_len;
-	ssize_t send_len;
+	int status;
 
 	char thread[LOG_THREAD_LEN];
 	size_t thread_len;
@@ -756,11 +768,13 @@ void __log_message(char const * fmt, ...)
 	}
 	else {
 		/* enqueue message in this thread's pipe */
-		// printf("would enqueue %s\n", msg);
-		send_len = write(local_reporter->msg_send, (uint8_t *) msg, msg_len + 1);
-		if (send_len != msg_len + 1) {
-			// TODO: Not yet sure how I want to handle write errors here
-			perror("write fail");
+		status = io_write_msg(local_reporter->msg_send, msg, true);
+
+		if (status) {
+			/* Log line could not be sent, fall back to direct emit */
+			pthread_mutex_lock(&log_ctx.lock);
+			_emit_message(msg);
+			pthread_mutex_unlock(&log_ctx.lock);
 		}
 	}
 }
