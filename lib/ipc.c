@@ -14,47 +14,6 @@
 
 static int send_fd = 0;
 
-/* Returns 0 on success, 1 if not sent but try_again not set, -errno if error */
-static int write_all(int send_fd, uint8_t * msg, size_t msg_len, bool try_again)
-{
-	ssize_t total_sent = 0;
-	ssize_t bytes_sent = 0;
-
-	while (total_sent < msg_len) {
-		bytes_sent = write(send_fd, msg, msg_len - total_sent);
-		if (bytes_sent < 0) {
-			if (errno == EINTR) {
-				/* Always try again if interrupted */
-				continue;
-			}
-			if (errno == EAGAIN) {
-				/* Send fd is blocked */
-				// TODO: I think this has the risk of yielding, and then
-				// another thread can begin a write, causing an unexpected
-				// merge of commands
-				if (try_again) {
-					sched_yield();
-					continue;
-				}
-				else {
-					return 0;
-				}
-			}
-			return -errno;
-		}
-
-		total_sent += bytes_sent;
-		msg += bytes_sent;
-
-		if (total_sent == msg_len) {
-			/* Complete write, nothing more to do */
-			break;
-		}
-	}
-
-	return 0;
-}
-
 /* NOTE: All host -> network conversions happen here, NOT BEFORE!
  * Katana should trust the values of this at any point outside this function.
  *
@@ -97,12 +56,13 @@ int ipc_send(ipc_msg_t * msg, bool try_again)
 	 * handler in event.c. When the first write is sent, the socket becomes
 	 * ready, so the handler goes to read it. It exits immediately instead of
 	 * waiting for a complete message to be sent. */
-	status = write_all(send_fd, (uint8_t *) &proxy, sizeof(ipc_msg_t), try_again);
+	// ^^ TODO pt3: now I'm refactoring io_write_msg, so this may need to be tweaked
+	status = io_write_msg(send_fd, (char *) &proxy, sizeof(ipc_msg_t), try_again);
 	//
 	if (status == 0) {
 		if (msg->len > 0) {
 			/* Write just the payload */
-			status = write_all(send_fd, msg->buf, msg->len, try_again);
+			status = io_write_msg(send_fd, msg->buf, msg->len, try_again);
 		}
 	}
 

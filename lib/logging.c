@@ -689,15 +689,15 @@ ref_scrollback_fail:
 // TODO: Not 100% sure if this is the most intuitive implementation
 // For now, this is parallel for whether the malloc above fails or not. If it
 // does, then the mutex is unlocked early, so this does not unlock twice.
-void logging_unref_scrollback(char *** scrollback)
+void logging_unref_scrollback(char *** scrollback_ref)
 {
-	if (scrollback && *scrollback) {
+	if (scrollback_ref && *scrollback_ref) {
 		/* LOCKED IN REF_SCROLLBACK */
 		pthread_mutex_unlock(&log_ctx.lock);
 		/* --- */
 
-		free(*scrollback);
-		*scrollback = NULL;
+		free(*scrollback_ref);
+		*scrollback_ref = NULL;
 	}
 }
 

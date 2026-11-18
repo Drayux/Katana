@@ -28,7 +28,7 @@ int logging_consumer_start(void);
 int logging_consumer_stop(void); // optional step: keeps log file open
 int logging_add_reporter(char const * friendly_name);
 char ** logging_ref_scrollback(int rel_lines);
-void logging_unref_scrollback(char *** scrollback); // ref to array of strings
+void logging_unref_scrollback(char *** scrollback_ref); // ref to array of strings
 
 /* Not intended to be called directly, prefer the macros below */
 void __log_message(char const * fmt, ...);
