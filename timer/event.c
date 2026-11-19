@@ -219,21 +219,18 @@ int event_poll(event_t * ev_out)
 	char * socket_path;
 
 	struct pollfd fds[] = {
+		// { .fd = ctx.notify_fd, .events = POLLIN },
 		{
 			.fd = ctx.pipe_fd,
-			.events = POLLIN | POLLHUP | POLLERR 
+			.events = POLLIN
 		},
 		{
 			.fd = ctx.sock_fd,
-			.events = POLLIN | POLLHUP | POLLERR
+			.events = POLLIN
 		},
-		// {
-			// .fd = ctx.notify_fd,
-			// .events = POLLIN | POLLERR /* | POLLNVAL */
-		// },
 	};
 	// int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
-	int const num_fds = 1;
+	int const num_fds = 1; // TODO: ipc disabled for now
 
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
@@ -243,8 +240,17 @@ int event_poll(event_t * ev_out)
 			if (errno == EINTR) {
 				continue;
 			}
+			goto event_fail;
 		}
-		else if (fds[0].revents & (POLLERR | POLLHUP));
+
+		if (fds[0].revents) {
+			if (fds[0].revents & (POLLERR | POLLHUP)) {
+				goto event_fail;
+			}
+			else if {
+			}
+			// else { /* ignore */ }
+		}
 		else if (fds[1].revents & (POLLERR | POLLHUP)) {
 			LOG_WARN("Poll error on IPC socket, closing");
 
@@ -264,12 +270,6 @@ int event_poll(event_t * ev_out)
 			break;
 		}
 
-		/* poll() did not complete successfully */
-		status = -errno;
-
-		// perror("poll fail");
-		LOG_FATAL("Unexpected poll error in main event loop");
-		return status;
 	}
 	
 	if (fds[1].revents & POLLIN) { /* IPC SOCK */
@@ -287,41 +287,24 @@ int event_poll(event_t * ev_out)
 	}
 
 	return (int) APP_CMD_SCAN; // 0
+
+event_fail:
+	status = -errno;
+	LOG_FATAL("unexpected poll error in main event loop");
+	return status;
 }
 
-/* TODO: I copied most of this from ipc:write_all (static as of writing this.)
- * I haven't decided if and how I'd like to consolodate these, if at all. */
 int event_send(event_t * ev, bool try_again)
 {
-	const size_t bytes_expected = sizeof(event_t);
-	ssize_t bytes_sent = 0;
+	const size_t len = sizeof(event_t); // TODO: payload support
+	int bytes_remaining;
 
-	/* Unless we're blocked, only make one write attempt --
-	 * Events on the internal pipe should not be partial
-	 * (TODO: How to better force this?) */
-	// do {
-		// if (bytes_sent < 0) {
-			// if (errno == EAGAIN) {
-				// break;
-			// }
-			// else if (errno == EINTR) {
-				// /* Always try again if interrupted */
-				// continue;
-			// }
-			// return -errno;
-		// }
-		// break;
-	// } while (true);
-
-	bytes_sent = write(ctx.event_fd, (uint8_t *) ev, bytes_expected);
-	LOG_DEBUGF("Sent %lu bytes", bytes_sent); // TODO remove this maybe
-
-	if (bytes_sent != bytes_expected) {
-		LOG_ERROR("Incomplete event write");
-		return 1;
+	bytes_remaining = io_write_msg(ctx.event_fd, ev, len, try_again);
+	if (bytes_remaining) {
+		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
 	}
 
-	return 0;
+	return bytes_remaining;
 }
 
 /* Prepare event handler loop --
@@ -351,9 +334,8 @@ int event_init(void)
 		ctx.event_fd = pipe_fds[1];
 	}
 	else {
-		// perror("pipe fail");
-		LOG_FATAL("pipe failed, could not create app event handler");
-		return -errno;
+		LOG_FATAL("pipe failed: could not create app event handler");
+		return -errno; // TODO: New error format
 	}
 
 	ipc_server_fd = ipc_listen();
@@ -362,7 +344,7 @@ int event_init(void)
 	}
 	else {
 		LOG_WARN("Failed to create IPC listener, running in standalone mode");
-		return 1; // non-fatal error
+		return 1; // non-fatal error (also TODO new error format)
 	}
 
 	return 0;

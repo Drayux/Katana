@@ -288,6 +288,9 @@ static void * log_consumer_loop(void * arg)
 		pthread_mutex_lock(&log_ctx.lock);
 
 		if (ready < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
 			/* unexpected shutdown */
 			err_msg = "poll fail";
 			goto consumer_exit;

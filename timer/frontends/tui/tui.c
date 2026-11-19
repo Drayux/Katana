@@ -122,7 +122,7 @@ static void help_draw_all(WINDOW * info_window)
 		" >    q     --  Quit\n"
 		" >    h     --  Show help pane (this!)\n"
 		" > [SPACE]  --  Start / split timer\n\n"
-		"   ///////  ~ debug ~  ///////\n"
+		"    ///// ~ debug ~ ///// \n"
 		" >    l     --  Show log output\n"
 		" >  [ESC]   --  Log something\n"
 		;

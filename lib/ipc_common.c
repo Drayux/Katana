@@ -1,4 +1,4 @@
-#include "ipc.h"
+#include "ipc_common.h"
 
 #include "environment.h"
 #include "io_common.h"

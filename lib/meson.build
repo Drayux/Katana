@@ -3,7 +3,7 @@ lib_includes = include_directories('../include')
 lib_sources = files(
     'environment.c',
     'io_common.c',
-    'ipc.c',
+    'ipc_common.c',
     'logging.c',
 )
 
