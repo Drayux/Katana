@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include "io_common.h"
 #include "ipc.h"
 #include "frontends/frontends.h"
 

@@ -9,6 +9,7 @@
 #include "environment.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/limits.h>
 #include <poll.h>

@@ -131,6 +131,14 @@ static inline void _emit_message(char const * const msg)
 	}
 }
 
+/* io_read_delim callback wrapper for _emit_message */
+static int _io_msg_cb(char const * const msg, size_t msg_len)
+{
+	(void) msg_len;
+	_emit_message(msg);
+	return 0; // drain emitted message, preserve anything left over
+}
+
 /* Returns the matching reporter or an empty one if it doesn't exist.
  * Check for empty via the "tail" struct member.
  *
@@ -213,8 +221,7 @@ static void * log_consumer_loop(void * arg)
 
 	int ready;
 	int fd_idx;
-	char msg[LOG_LINE_LEN];
-	ssize_t msg_len;
+	int pending_len;
 
 	reporter_t * telescope;
 	size_t fd_count;
@@ -223,8 +230,12 @@ static void * log_consumer_loop(void * arg)
 	char const * err_msg = NULL;
 
 	/* Static so that emitting does not consume additional memory */
-	static io_buf_t line_buf = io_buf_init(LOG_LINE_LEN);
-	ASSERT_ALLOC_GOTO(line_buf, consumer_exit);
+	static io_buf_t * line_buf = NULL;
+
+	if (!line_buf) {
+		line_buf = io_buf_create(LOG_LINE_LEN);
+		ASSERT_ALLOC_GOTO(line_buf, consumer_exit);
+	}
 
 	logging_add_reporter("logger"); // self
 
@@ -291,22 +302,26 @@ static void * log_consumer_loop(void * arg)
 					goto consumer_exit;
 				}
 
-				// TODO for tomorrow
-				// I think the bug with log lines being dropped is that a single
-				// reporter's pipe backs up, and we only emit the first LOG_LINE_LEN
-				// bytes of it. Revise this to have a delimiter character, and
-				// then seek the output to that delimiter.
+				do {
+					pending_len = io_read_delim(fds[fd_idx].fd, '\0', line_buf,
+						_io_msg_cb,
+						NULL);
+				} while (pending_len);
 
-				msg_len = read(fds[fd_idx].fd, msg, sizeof(msg) - 1);
-				if (msg_len < 0) {
-					/* read error */
-					/* same TODO as above ^^ */
-					err_msg = "read pipe fail";
-					goto consumer_exit;
+				if (pending_len) {
+					if (line_buf->status < 0) {
+						err_msg = "read pipe fail";
+						goto consumer_exit;
+					}
+					else if (line_buf->status > 0) {
+						/* Pipe FD guarantees atomic write, thus, this means
+						 * a critical bug, or something wrote to the wrong FD */
+						LOG_ERROR("incomplete log message: dump pipe");
+
+						line_buf->filled = 0;
+						line_buf->status = 0;
+					}
 				}
-
-				msg[msg_len] = '\0';
-				_emit_message(msg);
 			}
 		}
 
@@ -577,20 +592,21 @@ int logging_add_reporter(char const * friendly_name)
 	reporter_t * tail = NULL;
 
 	int pipe_fds[2];
+	int rval = 1; // syscall fail
 
 	/* search to be sure that the reporter does not already exist */
 	pthread_mutex_lock(&log_ctx.lock);
 	ref = _find_reporter(id);
 	if (!ref->tail) {
-		pthread_mutex_unlock(&log_ctx.lock);
-		LOG_ERROR("Duplicated log reporter");
-		return -1; // dev error
+		rval = -1; // dev error
+		LOG_ERROR("duplicated log reporter");
+		goto reporter_fail;
 	}
 
 	/* new reporter (messages block needs to be allocated still) */
     if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC)) {
 		LOG_ERROR("pipe fail");
-		return 1;
+		goto reporter_fail;
 	}
 	ref->id = id;
 	ref->name = friendly_name ? strdup(friendly_name) : NULL; // null ok
@@ -599,25 +615,27 @@ int logging_add_reporter(char const * friendly_name)
 
 	/* new tail; no release on failure, always cleaned up with shutdown */
 	tail = calloc(1, sizeof(reporter_t));
-	ASSERT_ALLOC(tail, 1);
+	ASSERT_ALLOC_GOTO(tail, reporter_fail);
 
 	tail->tail = true;
 	ref->next = tail;
 	ref->tail = false;
 
+	pthread_mutex_lock(&thread_ctx.lock);
+	_thread_notify(false); /* If the logger is running, it is polling on the
+							  previous fd set and won't see this one yet. */
+	pthread_mutex_unlock(&thread_ctx.lock);
 	pthread_mutex_unlock(&log_ctx.lock);
 
 	/* save the reporter pointer in thread-scoped storage */
 	local_reporter = ref;
 	LOG_DEBUGF("Registered thread %s (%d) with the logger",
 		friendly_name ? friendly_name : "null", (int) id);
-
-	pthread_mutex_lock(&thread_ctx.lock);
-	_thread_notify(false); /* If the logger is running, it is polling on the
-							  previous fd set and won't see this one yet. */
-	pthread_mutex_unlock(&thread_ctx.lock);
-
 	return 0;
+
+reporter_fail:
+	pthread_mutex_unlock(&log_ctx.lock);
+	return rval;
 }
 
 /*
@@ -761,14 +779,14 @@ void __log_message(char const * fmt, ...)
 		|| local_reporter->msg_send <= STDERR_FILENO /* reporter closed */
 		|| !atomic_load(&log_ctx.active) /* logging thread shutting down */
 	) {
-		/* block until closed, then emit directly to stderr */
+		/* Block until closed, then emit directly to stderr */
 		pthread_mutex_lock(&log_ctx.lock);
 		_emit_message(msg);
 		pthread_mutex_unlock(&log_ctx.lock);
 	}
 	else {
-		/* enqueue message in this thread's pipe */
-		status = io_write_msg(local_reporter->msg_send, msg, true);
+		/* Enqueue message in this thread's pipe */
+		status = io_write_msg(local_reporter->msg_send, msg, msg_len + 1, true);
 
 		if (status) {
 			/* Log line could not be sent, fall back to direct emit */

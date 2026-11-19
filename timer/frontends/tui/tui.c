@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include "event.h"
+#include "io_common.h"
 #include "ui.h"
 
 #include <curses.h>
@@ -118,12 +119,12 @@ static void help_draw_all(WINDOW * info_window)
 {
 	// TODO: Ideally this could be parsed rather than hard-coded
 	char const * help_str = "Press a key to invoke the corresponding command:\n"
-		" > q  --  Quit\n"
-		" > h  --  Show help pane (this!)\n"
+		" >    q     --  Quit\n"
+		" >    h     --  Show help pane (this!)\n"
 		" > [SPACE]  --  Start / split timer\n\n"
-		"   --  (debug) --\n"
-		" > l  --  Show log output\n"
-		" > [ESC]  --  Log something\n"
+		"   ///////  ~ debug ~  ///////\n"
+		" >    l     --  Show log output\n"
+		" >  [ESC]   --  Log something\n"
 		;
 
     werase(info_window);

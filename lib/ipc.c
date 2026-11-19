@@ -1,6 +1,7 @@
 #include "ipc.h"
 
 #include "environment.h"
+#include "io_common.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -55,7 +56,7 @@ int ipc_send(ipc_msg_t * msg, bool try_again)
 	 * ready, so the handler goes to read it. It exits immediately instead of
 	 * waiting for a complete message to be sent. */
 	// ^^ TODO pt3: now I'm refactoring io_write_msg, so this may need to be tweaked
-	status = io_write_msg(send_fd, (char *) &proxy, sizeof(ipc_msg_t), try_again);
+	status = io_write_msg(send_fd, &proxy, sizeof(ipc_msg_t), try_again);
 	//
 	if (status == 0) {
 		if (msg->len > 0) {
