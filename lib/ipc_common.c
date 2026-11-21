@@ -15,6 +15,130 @@
 
 static int send_fd = 0;
 
+// Creates a UNIX IPC socket where other processes can invoke katana commands
+int ipc_listen(void)
+{
+	int status = 0; // OK
+	int sockfd = -1;
+	char * sockpath;
+	struct sockaddr_un addr = {
+		.sun_family = AF_UNIX,
+	};
+
+	sockpath = ipc_get_socket_path();
+	if (!sockpath) {
+		LOG_ERROR("Invalid IPC socket path");
+		return -1;
+	}
+	strcpy(addr.sun_path, sockpath);
+	unlink(sockpath); // TODO: Test to be 100% sure this always returns
+					  // what we expect (no symlinks, etc.)
+
+	if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+		status = -errno;
+
+		LOG_ERROR("Failed to create IPC socket");
+		free(sockpath);
+		return status;
+	}
+
+	if (bind(sockfd, (struct sockaddr *) &addr, sizeof(addr)) < 0);
+	else if (listen(sockfd, 20) < 0); // backlog for many short connections
+	else {
+		// Success path
+		LOG_INFOF("Created IPC listener socket %s", sockpath);
+		free(sockpath);
+		return sockfd;
+	}
+
+	status = -errno;
+
+	LOG_ERROR("Failed to bind IPC socket");
+	close(sockfd);
+	free(sockpath);
+
+	return status ? status : sockfd;
+}
+
+/* Accepts a connection in a detached thread and passes any messages to the
+ * specified command handler routine */
+int ipc_handle(int sock_fd, ipc_handler_t on_msg)
+{
+	// Spawn a DETACHED thread
+	// ...
+
+	// it accepts the connection
+	int client_fd;
+	event_t * rval;
+
+	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
+		if (client_fd < 0) {
+			// perror("accept fail");
+			LOG_ERROR("Failed accept incoming IPC conenction");
+		}
+		else {
+			LOG_ERROR("Invalid IPC client fd during accept");
+		}
+		return NULL;
+	}
+
+	rval = read_ipc_msg(client_fd);
+	
+	/* TODO: Not sure if I want this permanently, but helpful for debug */
+	// NOTE: We are assuming that one IPC client fd sends exactly one command!
+	char x;
+	if (read(client_fd, &x, 1) > 0) {
+		LOG_WARN("IPC message exceeds reported length");
+	}
+	/* --- */
+
+	close(client_fd);
+	return rval;
+
+	// it loops on the connection, passing to on_msg
+	// ^^ loop handles the ipc_msg format..i.e. makes sure it sees a complete message
+	// ^^ loop may timeout unless it receives a keep-alive message
+}
+
+// Checks if the socket exists and connects to it if so. Returns socket fd on
+// success, -errno otherwise.
+// Call close on returned fd when done only on success
+int ipc_connect(void)
+{
+	int status = 0; // OK
+	int sockfd = -1;
+	char * sockpath;
+	struct sockaddr_un addr = {
+		.sun_family = AF_UNIX,
+	};
+
+	sockpath = ipc_get_socket_path();
+	if (!sockpath) {
+		LOG_ERROR("Invalid IPC socket path");
+		return -1;
+	}
+	strcpy(addr.sun_path, sockpath);
+	free(sockpath);
+
+	if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+		status = -errno;
+
+		LOG_ERROR("Failed to create IPC socket");
+		return status;
+	}
+
+	if (connect(sockfd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
+		status = -errno;
+
+		/* No error to log: This is a normal path when checking if the socket
+		 * exists */
+		close(sockfd);
+		return status;
+	}
+
+	return status ? status : sockfd;
+}
+
 /* NOTE: All host -> network conversions happen here, NOT BEFORE!
  * Katana should trust the values of this at any point outside this function. */
 int ipc_send(ipc_msg_t * msg, bool try_again)
@@ -77,103 +201,6 @@ int ipc_send(ipc_msg_t * msg, bool try_again)
 	return status;
 }
 
-// Creates a UNIX IPC socket where other processes can invoke katana commands
-int ipc_listen(void)
-{
-	int status = 0; // OK
-	int sockfd = -1;
-	char * sockpath;
-	struct sockaddr_un addr = {
-		.sun_family = AF_UNIX,
-	};
-
-	sockpath = ipc_get_socket_path();
-	if (!sockpath) {
-		LOG_ERROR("Invalid IPC socket path");
-		return -1;
-	}
-	strcpy(addr.sun_path, sockpath);
-	unlink(sockpath); // TODO: Test to be 100% sure this always returns
-					  // what we expect (no symlinks, etc.)
-
-	if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-		status = -errno;
-
-		LOG_ERROR("Failed to create IPC socket");
-		free(sockpath);
-		return status;
-	}
-
-	if (bind(sockfd, (struct sockaddr *) &addr, sizeof(addr)) < 0);
-	else if (listen(sockfd, 20) < 0); // backlog for many short connections
-	else {
-		// Success path
-		LOG_INFOF("Created IPC listener socket %s", sockpath);
-		free(sockpath);
-		return sockfd;
-	}
-
-	status = -errno;
-
-	LOG_ERROR("Failed to bind IPC socket");
-	close(sockfd);
-	free(sockpath);
-
-	return status ? status : sockfd;
-}
-
-// Checks if the socket exists and connects to it if so. Returns socket fd on
-// success, -errno otherwise.
-// Call close on returned fd when done only on success
-int ipc_connect(void)
-{
-	int status = 0; // OK
-	int sockfd = -1;
-	char * sockpath;
-	struct sockaddr_un addr = {
-		.sun_family = AF_UNIX,
-	};
-
-	sockpath = ipc_get_socket_path();
-	if (!sockpath) {
-		LOG_ERROR("Invalid IPC socket path");
-		return -1;
-	}
-	strcpy(addr.sun_path, sockpath);
-	free(sockpath);
-
-	if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-		status = -errno;
-
-		LOG_ERROR("Failed to create IPC socket");
-		return status;
-	}
-
-	if (connect(sockfd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
-		status = -errno;
-
-		/* No error to log: This is a normal path when checking if the socket
-		 * exists */
-		close(sockfd);
-		return status;
-	}
-
-	return status ? status : sockfd;
-}
-
-/* Simple setter for the FD that should be used for IPC communcation.
- * In essence, this would be called after ipc_connect for any secondary tool
- * to interfce with the timer, or after event_server_init by the main program
- * for the other threads to interact with the main thread. */
-void ipc_set_send_fd(int fd)
-{
-	if (send_fd > STDERR_FILENO) {
-		LOG_ERROR("Overwriting existing send fd");
-		close(send_fd);
-	}
-	send_fd = fd;
-}
-
 // TODO: This is another function where I want a consistent string retrieval
 // pattern. Not sure if it's worht the memory to make a bunch of static
 // path_max buffers?
@@ -200,3 +227,29 @@ char * ipc_get_socket_path(void)
 	strcpy(rptr, socket_path);
 	return rptr;
 }
+
+int ipc_unlink_socket_path(void)
+{
+	int rval = 1; // TODO: New return value format
+	char * socket_path;
+
+	if ((socket_path = ipc_get_socket_path())) {
+		rval = unlink(socket_path);
+		free(socket_path);
+	}
+
+	return rval;
+}
+
+/* Simple setter for the FD that should be used for IPC communcation.
+ * In essence, this would be called after ipc_connect for any secondary tool
+ * to interfce with the timer, or after event_server_init by the main program
+ * for the other threads to interact with the main thread. */
+// void ipc_set_send_fd(int fd)
+// {
+	// if (send_fd > STDERR_FILENO) {
+		// LOG_ERROR("Overwriting existing send fd");
+		// close(send_fd);
+	// }
+	// send_fd = fd;
+// }

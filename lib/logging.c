@@ -297,7 +297,7 @@ static void * log_consumer_loop(void * arg)
 		}
 
 		for (fd_idx = 1; fd_idx < fd_count; ++fd_idx) {
-			if (fds[fd_idx].revents != 0) {
+			if (fds[fd_idx].revents) {
 				if (!(fds[fd_idx].revents & POLLIN)) {
 					/* TODO: Instead of exiting, track which reporter errored
 					 * and set it's fd to -1 so it's skipped later on. */

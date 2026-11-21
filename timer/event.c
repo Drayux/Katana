@@ -14,9 +14,10 @@
 #include <linux/limits.h>
 #include <poll.h>
 #include <pthread.h>
-#include <stdio.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,9 +34,221 @@ static struct {
 	int event_fd; // write
 } ctx;
 
-static event_t * read_event(int recv_fd);
-static event_t * read_ipc_msg(int recv_fd);
-static event_t * handle_socket(int sock_fd);
+/* It is possible that a publisher thread is fully initialized before the event
+ * loop. The event_fd is undefined before initialization, so we add this lock. */
+static atomic_bool ready = false;
+static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+static event_t * read_event(int recv_fd); /* message handler for event pipe */
+static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
+
+/* Return value is the command op as an int, 0 if none but OK, negative on
+ * failure. Main loop should begin shutdown immediately on the latter.
+ * Former two can have any number of stages defined by the app itself (aka the
+ * confirm save / confirm reload type of logic should not be handled here.`
+ * This only provides the raw command.) */
+int event_poll(event_t * ev_out)
+{
+	event_t * ev_ref = NULL;
+	int status = 0;
+
+	int ready;
+	char * socket_path;
+
+	struct pollfd fds[] = {
+		// { .fd = ctx.notify_fd, .events = POLLIN },
+		{
+			.fd = ctx.pipe_fd,
+			.events = POLLIN
+		},
+		{
+			.fd = ctx.sock_fd,
+			.events = POLLIN
+		},
+	};
+	// int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
+	int const num_fds = 1; // TODO: ipc disabled for now
+
+	/* Waits for something to read */
+	// TODO consider using ppoll here to support a high refresh rate
+	// autosplitter setting
+	while (true) {
+		ready = poll(fds, num_fds, -1);
+		if (ready < 0) {
+			if (errno != EINTR) {
+				status = -errno;
+				LOG_FATAL("unexpected poll error in main event loop");
+				return status; // TODO new return value format
+			}
+			continue;
+		}
+		else if (fds[1].revents & (POLLERR | POLLHUP)) {
+			LOG_WARN("poll error on IPC socket: closing");
+			// pthread_rwlock_wrlock(&fd_lock); // NOTE: Currently not needed
+			//                                     only accessed by polling thread
+			DESTROY_FD(ctx.sock_fd);
+			ipc_unlink_socket_path();
+			//
+			// pthread_rwlock_unlock(&fd_lock);
+			continue;
+		}
+		break;
+	}
+
+	// TODO: On the case an internal and ipc event both arrive simultaneously,
+	// I cannot yet assert what the best behavior would be. For now, every
+	// event will be processed, but it may be prudent to drop those of
+	// lower-priority.
+
+	/* IPC SOCK */
+	if (fds[1].revents) {
+		if (fds[1].revents & POLLIN) {
+			ev_ref = ipc_handle(fds[1].fd, read_ipc_message);
+		}
+		else {
+			// I don't expect to get here, but it seemed prudent to track
+			// so that I might correct it later if I do (TODO)
+			LOG_ERRORF("unhandled IPC revent: %u", fds[1].revents);
+			// pthread_rwlock_wrlock(&fd_lock); // NOTE: Currently not needed
+			//                                     only accessed by polling thread
+			DESTROY_FD(ctx.sock_fd);
+			ipc_unlink_socket_path();
+			//
+			// pthread_rwlock_unlock(&fd_lock);
+			return (int) APP_CMD_ERROR; // -1
+		}
+	}
+	/* EV PIPE */
+	else if (fds[0].revents) {
+		if (fds[0].revents & POLLIN) {
+			// TODO: Should I use this or ctx.pipe_fd ?
+			// pthread_rwlock_rdlock(&fd_lock); // NOTE: See above, also extraneous
+			//
+			ev_ref = read_event(fds[0].fd);
+			//
+			// pthread_rwlock_unlock(&fd_lock);
+		}
+		else {
+			LOG_FATAL("broken event pipe");
+			pthread_rwlock_wrlock(&fd_lock);
+			//
+			DESTROY_FD(ctx.event_fd);
+			DESTROY_FD(ctx.pipe_fd); // Alike IPC_FD this may be outside the lock
+			//
+			pthread_rwlock_unlock(&fd_lock);
+			return (int) APP_CMD_ERROR; // -1
+		}
+	}
+	/* TIMEOUT */
+	// else {  }
+
+	if (ev_ref) {
+		memcpy(ev_out, ev_ref, sizeof(event_t));
+		return (int) ev_ref->opcode;
+	}
+
+	return (int) APP_CMD_SCAN; // 0
+}
+
+int event_send(event_t * ev, bool try_again)
+{
+	const size_t len = sizeof(event_t); // TODO: payload support
+	int bytes_remaining;
+
+	/* There is little concern for the "close" race condition as we do not plan
+	 * to change this value. If ready is unset, then the program must already
+	 * be exiting, and no new FDs will be opened at this time.
+	 *
+	 * Close race condition:
+	 *  - Another thread goes to perform a write 
+	 *  - Main thread invokes shutdown
+	 *  - Publisher thread passes this check and sits on io_write_msg
+	 *  - FD is closed
+	 *  - Publisher writes to a closed FD
+	 * Danger would exist if the value of event_fd changes, or if another file
+	 * is opened and the kernel reuses this fd.
+	 */
+	if (!(atomic_load(&ready))) {
+		LOG_WARN("drop event: fd not ready");
+		return -1;
+	}
+
+	pthread_rwlock_rdlock(&fd_lock); // ensure event_fd is valid
+	bytes_remaining = io_write_msg(ctx.event_fd, ev, len, try_again);
+	pthread_rwlock_unlock(&fd_lock);
+	if (bytes_remaining) {
+		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
+	}
+
+	return bytes_remaining;
+}
+
+/* Prepare event handler loop --
+ * Returns 0 on success, -errno on failure
+ *
+ * NOTE: Event needs no mutex because it is intended to be released in main
+ * after the slave threads are joined */
+int event_init(void)
+{
+    int pipe_fds[2];
+	int ipc_server_fd;
+
+	/*
+	 * TODO: This was originally an "emergency thread wake"
+	 * I don't currently have a use for it, but I wanted to hold onto it until
+	 * I assert that I don't need it.
+	 *
+	notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
+    if (notify_fd < 0) {
+		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
+		return NULL;
+	}
+	 */
+
+    if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
+		ctx.pipe_fd = pipe_fds[0];
+		ctx.event_fd = pipe_fds[1];
+	}
+	else {
+		LOG_FATAL("pipe failed: could not create app event handler");
+		return -errno; // TODO: New error format
+	}
+
+	ipc_server_fd = ipc_listen();
+	if (ipc_server_fd > STDERR_FILENO) {
+		ctx.sock_fd = ipc_server_fd;
+	}
+	else {
+		LOG_WARN("Failed to create IPC listener, running in standalone mode");
+		return 1; // non-fatal error (also TODO new error format)
+	}
+
+	atomic_store(&ready, true);
+
+	return 0;
+}
+
+void event_shutdown(void)
+{
+	// SET_EVENT(notify_fd);
+
+	pthread_rwlock_wrlock(&fd_lock);
+	//
+	DESTROY_FD(ctx.event_fd); // write end
+	DESTROY_FD(ctx.pipe_fd); // read end
+	//
+	pthread_rwlock_unlock(&fd_lock);
+
+	/* NOTE: Currently only the polling thread references or knows about this
+	 * FD. Thus, the lock isn't necessary for this one. It doesn't hurt to have
+	 * it in there, but I wanted to indicate this consistently across the file
+	 * since that is possible to change at some point. */
+	DESTROY_FD(ctx.sock_fd);
+	ipc_unlink_socket_path();
+}
+
+
+/* -- INTERNAL -- */
 
 static event_t * read_event(int recv_fd)
 {
@@ -75,14 +288,9 @@ static event_t * read_event(int recv_fd)
 	return &ev_buf;
 }
 
+// NEW STUFF! This should become the callback routine used by the handler
 /* Read an IPC message from an FD, convert into an event_t. */
-/* 
- * TODO: This is the method that would detect "status request" commands, which
- * necessitate a reply. I have not yet decided on this implementation! I think
- * I'd prefer to have a dedicated "IPC send thread" to which such replies may
- * be deferred.
- */
-static event_t * read_ipc_msg(int recv_fd)
+static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 {
 	static ipc_msg_t cmd_buf;
 	static event_t ev_buf;
@@ -169,207 +377,4 @@ static event_t * read_ipc_msg(int recv_fd)
 		app_cmd_to_str(ev_buf.opcode), payload_len);
 
 	return &ev_buf;
-}
-
-/* Accepts a connection and passes it to the command handler */
-static event_t * handle_socket(int sock_fd)
-{
-	int client_fd;
-	event_t * rval;
-
-	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
-		if (client_fd < 0) {
-			// perror("accept fail");
-			LOG_ERROR("Failed accept incoming IPC conenction");
-		}
-		else {
-			LOG_ERROR("Invalid IPC client fd during accept");
-		}
-		return NULL;
-	}
-
-	rval = read_ipc_msg(client_fd);
-	
-	/* TODO: Not sure if I want this permanently, but helpful for debug */
-	// NOTE: We are assuming that one IPC client fd sends exactly one command!
-	char x;
-	if (read(client_fd, &x, 1) > 0) {
-		LOG_WARN("IPC message exceeds reported length");
-	}
-	/* --- */
-
-	close(client_fd);
-	return rval;
-}
-
-
-/* --- PUBLIC API --- */
-
-/* Return value is the command op as an int, 0 if none but OK, negative on
- * failure. Main loop should begin shutdown immediately on the latter.
- * Former two can have any number of stages defined by the app itself (aka the
- * confirm save / confirm reload type of logic should not be handled here.`
- * This only provides the raw command.) */
-int event_poll(event_t * ev_out)
-{
-	event_t * ev_ref = NULL;
-	int status = 0;
-
-	int ready;
-	char * socket_path;
-
-	struct pollfd fds[] = {
-		// { .fd = ctx.notify_fd, .events = POLLIN },
-		{
-			.fd = ctx.pipe_fd,
-			.events = POLLIN
-		},
-		{
-			.fd = ctx.sock_fd,
-			.events = POLLIN
-		},
-	};
-	// int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
-	int const num_fds = 1; // TODO: ipc disabled for now
-
-	/* Waits for something to read */
-	// TODO consider using ppoll here to support a high refresh rate
-	// autosplitter setting
-	while((ready = poll(fds, num_fds, -1))) {
-		if (ready < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			goto event_fail;
-		}
-
-		if (fds[0].revents) {
-			if (fds[0].revents & (POLLERR | POLLHUP)) {
-				goto event_fail;
-			}
-			else if {
-			}
-			// else { /* ignore */ }
-		}
-		else if (fds[1].revents & (POLLERR | POLLHUP)) {
-			LOG_WARN("Poll error on IPC socket, closing");
-
-			// TODO: Another spot to consider the fd race condition
-			// TODO pt2: Same logic as shutdown function, maybe consolidate
-			close(ctx.sock_fd);
-			ctx.sock_fd = -1;
-			if ((socket_path = ipc_get_socket_path())) {
-				unlink(socket_path);
-				free(socket_path);
-			}
-
-			break;
-		}
-		else {
-			/* Normal path */
-			break;
-		}
-
-	}
-	
-	if (fds[1].revents & POLLIN) { /* IPC SOCK */
-		LOG_DEBUG("IPC socket ready");
-		ev_ref = handle_socket(fds[1].fd);
-	}
-	else if (fds[0].revents & POLLIN) { /* PIPE */
-		LOG_DEBUG("Event pipe ready");
-		ev_ref = read_event(fds[0].fd);
-	}
-
-	if (ev_ref) {
-		memcpy(ev_out, ev_ref, sizeof(event_t));
-		return (int) ev_ref->opcode;
-	}
-
-	return (int) APP_CMD_SCAN; // 0
-
-event_fail:
-	status = -errno;
-	LOG_FATAL("unexpected poll error in main event loop");
-	return status;
-}
-
-int event_send(event_t * ev, bool try_again)
-{
-	const size_t len = sizeof(event_t); // TODO: payload support
-	int bytes_remaining;
-
-	bytes_remaining = io_write_msg(ctx.event_fd, ev, len, try_again);
-	if (bytes_remaining) {
-		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
-	}
-
-	return bytes_remaining;
-}
-
-/* Prepare event handler loop --
- * Returns 0 on success, -errno on failure
- *
- * NOTE: Event needs no mutex because it is intended to be released in main
- * after the slave threads are joined */
-int event_init(void)
-{
-    int pipe_fds[2];
-	int ipc_server_fd;
-
-	/*
-	 * TODO: This was originally an "emergency thread wake"
-	 * I don't currently have a use for it, but I wanted to hold onto it until
-	 * I assert that I don't need it.
-	 *
-	notify_fd = eventfd(0, O_NONBLOCK | O_CLOEXEC);
-    if (notify_fd < 0) {
-		LOG_ERROR("eventfd fail: could not create UI thread wake event fd");
-		return NULL;
-	}
-	 */
-
-    if (pipe2(pipe_fds, O_NONBLOCK | O_CLOEXEC) == 0) {
-		ctx.pipe_fd = pipe_fds[0];
-		ctx.event_fd = pipe_fds[1];
-	}
-	else {
-		LOG_FATAL("pipe failed: could not create app event handler");
-		return -errno; // TODO: New error format
-	}
-
-	ipc_server_fd = ipc_listen();
-	if (ipc_server_fd > STDERR_FILENO) {
-		ctx.sock_fd = ipc_server_fd;
-	}
-	else {
-		LOG_WARN("Failed to create IPC listener, running in standalone mode");
-		return 1; // non-fatal error (also TODO new error format)
-	}
-
-	return 0;
-}
-
-void event_shutdown(void)
-{
-	char * socket_path;
-
-	// SET_EVENT(notify_fd);
-
-	if (ctx.sock_fd > STDERR_FILENO) {
-		close(ctx.sock_fd);
-		ctx.sock_fd = -1;
-
-		if ((socket_path = ipc_get_socket_path())) {
-			unlink(socket_path);
-			free(socket_path);
-		}
-	}
-
-	if (ctx.pipe_fd > STDERR_FILENO) { // read end
-		close(ctx.pipe_fd);
-	}
-	if (ctx.event_fd > STDERR_FILENO) { // write end
-		close(ctx.event_fd);
-	}
 }

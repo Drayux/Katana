@@ -6,6 +6,7 @@
 // #include <linux/limits.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define IO_BLOCK_SIZE 4096 /* Max size for a single I/O operation */
 // ^^ TODO: Consider using PIPE_BUF instead
@@ -79,3 +80,10 @@ int io_write_msg(int send_fd, void * msg, size_t len, bool try_again);
 		}                                                         \
 	} while (0)
 
+#define DESTROY_FD(fd)                                            \
+    do {                                                          \
+		if ((fd) > STDERR_FILENO)) {                              \
+			close((fd));                                          \
+			(fd) = -1;                                            \
+		}                                                         \
+    } while (0)

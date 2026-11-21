@@ -287,6 +287,9 @@ int io_write_msg(int send_fd, void * msg, size_t len, bool try_again)
 	if (!total_len) {
 		return 0;
 	}
+	else if (send_fd < 0) {
+		return total_len;
+	}
 
 	while ((send_len = total_len - total_sent) > 0) {
 		send_len = send_len < IO_BLOCK_SIZE ?
