@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define KATANA_IPC_PATH "katana.sock"
+#define KATANA_IPC_MAX_PAYLOAD (512u)
+
 /* Shared enum type between IPC and internal EVENT messages */
 typedef enum {
 	APP_CMD_ERROR = -1,
@@ -34,12 +37,6 @@ typedef enum {
 typedef uint16_t app_cmd_t
  */
 
-
-#define KATANA_IPC_PATH "katana.sock"
-#define KATANA_IPC_MAX_PAYLOAD (512u)
-
-typedef int (* ipc_handler_t) (ipc_msg_t * msg, int send_fd);
-
 /* IPC event struct -- Katana converts this into an event_t after read. */
 typedef struct __attribute__((__packed__)) {
 	timestamp_t ts;
@@ -49,11 +46,14 @@ typedef struct __attribute__((__packed__)) {
 	uint8_t buf[];
 } ipc_msg_t;
 
+typedef int (* ipc_handler_t) (ipc_msg_t * msg, int send_fd);
+
 int ipc_listen(void);
 int ipc_handle(int sock_fd, ipc_handler_t on_msg); /* incoming connection handler */
 int ipc_connect(void);
 int ipc_send(ipc_msg_t * msg, bool try_again); // TODO: ipc refactor
 char * ipc_get_socket_path(void);
+int ipc_unlink_socket_path(void);
 // void ipc_set_send_fd(int fd);
 
 // TODO: Considering a couple extra versions if need be:

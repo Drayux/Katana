@@ -62,6 +62,7 @@ int ipc_listen(void)
 
 /* Accepts a connection in a detached thread and passes any messages to the
  * specified command handler routine */
+// TODO: Very WIP function
 int ipc_handle(int sock_fd, ipc_handler_t on_msg)
 {
 	// Spawn a DETACHED thread
@@ -69,7 +70,8 @@ int ipc_handle(int sock_fd, ipc_handler_t on_msg)
 
 	// it accepts the connection
 	int client_fd;
-	event_t * rval;
+	// event_t * rval;
+	int rval;
 
 	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
 		if (client_fd < 0) {
@@ -79,17 +81,11 @@ int ipc_handle(int sock_fd, ipc_handler_t on_msg)
 		else {
 			LOG_ERROR("Invalid IPC client fd during accept");
 		}
-		return NULL;
+		return -1; // TODO: Revised error return
 	}
 
-	rval = read_ipc_msg(client_fd);
+	rval = on_msg(NULL, client_fd);
 	
-	/* TODO: Not sure if I want this permanently, but helpful for debug */
-	// NOTE: We are assuming that one IPC client fd sends exactly one command!
-	char x;
-	if (read(client_fd, &x, 1) > 0) {
-		LOG_WARN("IPC message exceeds reported length");
-	}
 	/* --- */
 
 	close(client_fd);

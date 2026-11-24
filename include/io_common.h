@@ -55,35 +55,34 @@ int io_write_msg(int send_fd, void * msg, size_t len, bool try_again);
 
 /* -- Event FD utility -- */
 
-/* Cleans up the multitude of eventfd notifications               /
- * This exists because of the explicit 8-byte eventfd I/O        */
-// TODO: This probably is not the best spot for this
-#define SET_EVENT(fd)                                             \
-    do {                                                          \
-        uint8_t _wake[8] = { 1 };                                 \
-		(void) !write((fd), _wake, 8);                            \
+/* Cleans up the multitude of eventfd notifications                /
+ * This exists because of the explicit 8-byte eventfd I/O         */
+#define SET_EVENT(fd)                                              \
+    do {                                                           \
+        uint8_t _wake[8] = { 1 };                                  \
+		(void) !write((fd), _wake, 8);                             \
     } while (0)
-#define CLEAR_EVENT(fd)                                           \
-	do {                                                          \
-		ssize_t _len;                                             \
-		uint8_t _buf[8];                                          \
-		while ((_len = read((fd), _buf, 8))) {                    \
-			if (_len < 0) {                                       \
-				if (errno != EAGAIN) {                            \
-					LOG_ERROR("read: notify fd error");           \
-				}                                                 \
-				break;                                            \
-			}                                                     \
-			else if (_len != 8) {                                 \
-				LOG_ERRORF("read: unexpected event len %d", _len);\
-			}                                                     \
-		}                                                         \
+#define CLEAR_EVENT(fd)                                            \
+	do {                                                           \
+		ssize_t _len;                                              \
+		uint8_t _buf[8];                                           \
+		while ((_len = read((fd), _buf, 8))) {                     \
+			if (_len < 0) {                                        \
+				if (errno != EAGAIN) {                             \
+					LOG_ERROR("read: notify fd error");            \
+				}                                                  \
+				break;                                             \
+			}                                                      \
+			else if (_len != 8) {                                  \
+				LOG_ERRORF("read: unexpected event len %d", _len); \
+			}                                                      \
+		}                                                          \
 	} while (0)
 
-#define DESTROY_FD(fd)                                            \
-    do {                                                          \
-		if ((fd) > STDERR_FILENO)) {                              \
-			close((fd));                                          \
-			(fd) = -1;                                            \
-		}                                                         \
+#define DESTROY_FD(fd)                                             \
+    do {                                                           \
+		if ((fd) > STDERR_FILENO) {                                \
+			close((fd));                                           \
+			(fd) = -1;                                             \
+		}                                                          \
     } while (0)

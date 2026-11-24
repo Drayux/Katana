@@ -1,7 +1,7 @@
 #include "ui.h"
 
 #include "io_common.h"
-#include "ipc.h"
+#include "ipc_common.h"
 #include "frontends/frontends.h"
 
 #include <fcntl.h>

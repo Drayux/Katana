@@ -114,7 +114,7 @@ int main(int argc, char * argv[])
 	while ((event_op = event_poll(&event)) >= 0) {
 
 
-		// FOR NEXT TIME!
+		// FOR NEXT TIME! (after the main event stuff, but before the timer stuff)
 		// The mystery pieces are:
 		// - Clean ways to do the refresh rate -- maybe poll with the timeout?
 		// - Handling the unloaded state / how to load splits at all

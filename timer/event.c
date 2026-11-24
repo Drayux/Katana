@@ -7,6 +7,7 @@
 #include "event.h"
 
 #include "environment.h"
+#include "io_common.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -34,18 +35,72 @@ static struct {
 	int event_fd; // write
 } ctx;
 
-/* It is possible that a publisher thread is fully initialized before the event
- * loop. The event_fd is undefined before initialization, so we add this lock. */
+/* Initialization protection as it is possible that a publisher thread is fully
+ * initialized before the event consumer loop. */
 static atomic_bool ready = false;
 static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
 
 static event_t * read_event(int recv_fd); /* message handler for event pipe */
 static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
 
+
+
+/* FOR NEXT TIME!
+ * - My order of development will be to "perfect" the event sending in the
+ *   current (event pipe) form. 
+ * - After this, I will implement the event queue version instead -- I had an
+ * unfortunately-timed epiphany that short blocks via mutexes are no longer
+ * nearly as important with my new design. Of course, we don't want to miss
+ * an autosplitter scan, but it is allowable that the threads block for short
+ * atomic sections. Especially when we're going from no action -> some action
+ * at all, main was blocked on the poll anyway.
+ * - Finally, I will implement the new version of the IPC handler (function
+ *   skeleton in ipc_common.c) which accepts a connection in a detached thread.
+ *   It will read in ipc_msg_t formatted messages and convert them into event_t
+ *   structs and forward that to the event queue with the new methods in part 2
+ *
+ * For part one, I'm seeking to solve the case of the payload pointer. Few
+ * internal events will need this (if any??) and it seems senseless to malloc
+ * and free each time if it's a regular or semi-regular interval. Thus, I'm
+ * considering an "event heap" of sorts in this file. Instead of a pointer,
+ * an event would get a heap index. This heap would be reused as messages are
+ * consumed. Because we'll use a block, we can also increment events
+ * sequentially. Unordered events may be dropped, and heap indexes less than the
+ * current can be "garbage collected" if we determine the event was dropped.
+ */
+
+
+
+/* Send an event via the internal pipe, can be called by any thread, thus
+ * the event fd needs to be protected with a lock. */
+// TODO: payload support
+int event_send(event_t * ev, bool try_again)
+{
+	const size_t len = sizeof(event_t);
+	int bytes_remaining;
+
+	if (!(atomic_load(&ready))) {
+		LOG_WARN("drop event: fd not ready");
+		return -1;
+	}
+
+	pthread_rwlock_rdlock(&fd_lock); // ensure event_fd is valid
+	bytes_remaining = io_write_msg(ctx.event_fd, ev, len, try_again);
+	pthread_rwlock_unlock(&fd_lock);
+	if (bytes_remaining) {
+		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
+	}
+
+	return bytes_remaining;
+}
+
+/* --- */
+
+
 /* Return value is the command op as an int, 0 if none but OK, negative on
  * failure. Main loop should begin shutdown immediately on the latter.
  * Former two can have any number of stages defined by the app itself (aka the
- * confirm save / confirm reload type of logic should not be handled here.`
+ * confirm save / confirm reload type of logic is not handled here.
  * This only provides the raw command.) */
 int event_poll(event_t * ev_out)
 {
@@ -103,37 +158,30 @@ int event_poll(event_t * ev_out)
 	/* IPC SOCK */
 	if (fds[1].revents) {
 		if (fds[1].revents & POLLIN) {
-			ev_ref = ipc_handle(fds[1].fd, read_ipc_message);
+			// ev_ref = ipc_handle(fds[1].fd, read_ipc_message);
+			LOG_WARN("Skipped IPC event while it's under construction");
 		}
 		else {
 			// I don't expect to get here, but it seemed prudent to track
 			// so that I might correct it later if I do (TODO)
 			LOG_ERRORF("unhandled IPC revent: %u", fds[1].revents);
-			// pthread_rwlock_wrlock(&fd_lock); // NOTE: Currently not needed
-			//                                     only accessed by polling thread
 			DESTROY_FD(ctx.sock_fd);
 			ipc_unlink_socket_path();
-			//
-			// pthread_rwlock_unlock(&fd_lock);
 			return (int) APP_CMD_ERROR; // -1
 		}
 	}
 	/* EV PIPE */
 	else if (fds[0].revents) {
 		if (fds[0].revents & POLLIN) {
-			// TODO: Should I use this or ctx.pipe_fd ?
-			// pthread_rwlock_rdlock(&fd_lock); // NOTE: See above, also extraneous
-			//
 			ev_ref = read_event(fds[0].fd);
-			//
-			// pthread_rwlock_unlock(&fd_lock);
 		}
 		else {
 			LOG_FATAL("broken event pipe");
+			DESTROY_FD(ctx.pipe_fd);
+
 			pthread_rwlock_wrlock(&fd_lock);
 			//
 			DESTROY_FD(ctx.event_fd);
-			DESTROY_FD(ctx.pipe_fd); // Alike IPC_FD this may be outside the lock
 			//
 			pthread_rwlock_unlock(&fd_lock);
 			return (int) APP_CMD_ERROR; // -1
@@ -148,39 +196,6 @@ int event_poll(event_t * ev_out)
 	}
 
 	return (int) APP_CMD_SCAN; // 0
-}
-
-int event_send(event_t * ev, bool try_again)
-{
-	const size_t len = sizeof(event_t); // TODO: payload support
-	int bytes_remaining;
-
-	/* There is little concern for the "close" race condition as we do not plan
-	 * to change this value. If ready is unset, then the program must already
-	 * be exiting, and no new FDs will be opened at this time.
-	 *
-	 * Close race condition:
-	 *  - Another thread goes to perform a write 
-	 *  - Main thread invokes shutdown
-	 *  - Publisher thread passes this check and sits on io_write_msg
-	 *  - FD is closed
-	 *  - Publisher writes to a closed FD
-	 * Danger would exist if the value of event_fd changes, or if another file
-	 * is opened and the kernel reuses this fd.
-	 */
-	if (!(atomic_load(&ready))) {
-		LOG_WARN("drop event: fd not ready");
-		return -1;
-	}
-
-	pthread_rwlock_rdlock(&fd_lock); // ensure event_fd is valid
-	bytes_remaining = io_write_msg(ctx.event_fd, ev, len, try_again);
-	pthread_rwlock_unlock(&fd_lock);
-	if (bytes_remaining) {
-		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
-	}
-
-	return bytes_remaining;
 }
 
 /* Prepare event handler loop --
@@ -234,58 +249,57 @@ void event_shutdown(void)
 
 	pthread_rwlock_wrlock(&fd_lock);
 	//
-	DESTROY_FD(ctx.event_fd); // write end
-	DESTROY_FD(ctx.pipe_fd); // read end
+	DESTROY_FD(ctx.event_fd); // event pipe write end
 	//
 	pthread_rwlock_unlock(&fd_lock);
 
-	/* NOTE: Currently only the polling thread references or knows about this
-	 * FD. Thus, the lock isn't necessary for this one. It doesn't hurt to have
-	 * it in there, but I wanted to indicate this consistently across the file
-	 * since that is possible to change at some point. */
+	/* NOTE: Currently only the polling thread references or knows about these
+	 * FDs. Thus, the lock isn't necessary for these. */
+	DESTROY_FD(ctx.pipe_fd); // event pipe read end
 	DESTROY_FD(ctx.sock_fd);
 	ipc_unlink_socket_path();
 }
 
-
 /* -- INTERNAL -- */
 
+// TODO: Payload support
 static event_t * read_event(int recv_fd)
 {
-	static event_t ev_buf;
+	static io_buf_t * ev_buf = NULL;
+	static event_t new_ev;
 
-	ssize_t bytes_read = 0;
-	ssize_t total_read = 0;
+	int len; // len because we have no on_message CB to io_read()
 
-	/* TODO: While functional, I don't love that I did this differently than
-	 * the IPC version. This one totals the entire struct, whereas IPC totals
-	 * only the payload. */
-	while (total_read < sizeof(event_t)) {
-		bytes_read = read(recv_fd, (uint8_t *) &ev_buf, sizeof(event_t) - total_read);
-		if (!bytes_read) {
-			LOG_ERROR("Received app event with no data");
-			return NULL;
-		}
-		else if (bytes_read < 0) {
-			switch (errno) {
-				case EINTR:
-				case EAGAIN:
-					continue;
-			}
-			break;
-		}
-		total_read += bytes_read;
+	// TODO: This won't be freed at program exit in the current form. Clean up
+	// after testing (or refactoring to the queue system.)
+	if (!ev_buf) {
+		ev_buf = io_buf_create(sizeof(event_t));
 	}
 
-	if (total_read != sizeof(event_t)) {
-		LOG_ERRORF("Incomplete event: "
+	/* Prefer io_read as pipe writes are atomic under PIPE_LEN bytes */
+	len = io_read(recv_fd, ev_buf, NULL, NULL);
+	if (len < 0) {
+		// error logged by internal func
+		return NULL;
+		// ^^ TODO: Maybe return error via the event itself?
+	}
+
+	if (len < sizeof(event_t)) {
+		LOG_ERRORF("drop partial app event: " \
 			"%ld bytes read does not match %ld expected",
-			total_read, sizeof(event_t));
-		ev_buf.payload = NULL; // better to risk a memory leak than a segfault
-		ev_buf.len = -1; // indicates an error occurred
+			len, sizeof(event_t));
+		return NULL;
+	}
+	else if (len > sizeof(event_t)) {
+		LOG_ERROR("received event larger than expected");
+		// keep going
 	}
 
-	return &ev_buf;
+	memcpy(&new_ev, ev_buf->_buf, sizeof(event_t));
+	ev_buf->filled = 0;
+
+	// TODO: This value has a dubiously limited lifetime (currently static)
+	return &new_ev;
 }
 
 // NEW STUFF! This should become the callback routine used by the handler
@@ -301,11 +315,11 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 	ssize_t bytes_read = 0;
 	ssize_t total_read = 0;
 
-	bytes_read = read(recv_fd, (uint8_t *) &cmd_buf, sizeof(ipc_msg_t));
+	// bytes_read = read(recv_fd, (uint8_t *) &cmd_buf, sizeof(ipc_msg_t));
 	if (!bytes_read) {
 		/* connection closed immediately */
 		LOG_DEBUG("File closed before read");
-		return NULL;
+		return -1;
 	}
 	else if (bytes_read < 0) {
 		switch (errno) {
@@ -313,14 +327,16 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 			case EAGAIN:
 				/* Try again */
 				// TOOD: Hopefully this becomes a stack-friendly tail recursion
-				return read_ipc_msg(recv_fd);
+				// return read_ipc_msg(recv_fd);
+				return -1;
 		}
 		// perror("read");
 		LOG_DEBUG("Unexpected error during IPC read");
-		return NULL;
+		return -1;
 	}
 
-	payload_len = (ssize_t) ntohs(cmd_buf.len);
+	// payload_len = (ssize_t) ntohs(cmd_buf.len);
+	payload_len = 0;
 
 	do {
 		if (!payload_len) {
@@ -341,7 +357,7 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 
 		while (total_read < payload_len) {
 			// TODO: I probably want the same error checking above?
-			bytes_read = read(recv_fd, payload_buf, payload_len - total_read);
+			// bytes_read = read(recv_fd, payload_buf, payload_len - total_read);
 			if (!bytes_read) {
 				break; // inner
 			}
@@ -376,5 +392,5 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 	LOG_DEBUGF("New event received: %s (%ld bytes)",
 		app_cmd_to_str(ev_buf.opcode), payload_len);
 
-	return &ev_buf;
+	return 0;
 }
