@@ -26,6 +26,7 @@ typedef enum {
 	APP_CMD_STOP,
 	APP_CMD_LOAD,
 	APP_CMD_SAVE,
+	__APP_CMD_MAX,
 	// TODO: The rest of the split commands
 } app_cmd_t;
 

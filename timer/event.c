@@ -40,10 +40,30 @@ static struct {
 static atomic_bool ready = false;
 static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
 
+static atomic_int ev_counter = 1000; // arbitrary, nonzero makes it easier to spot in logs
+// ^^ (unimportant) TODO: No overflow protection implemented yet
+
 static event_t * read_event(int recv_fd); /* message handler for event pipe */
 static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
 
+/* -- Event payload heap -- */
 
+#define EVHEAP_LEN 4
+
+// #define EVHEAP_STATE_NEW (1)
+// #define EVHEAP_STATE_BORROW (-1)
+// #define EVHEAP_STATE_RELEASE (0) // not in use; won't be in use
+
+typedef struct {
+	atomic_bool lock; // prevent two threads from using the same entry
+	atomic_bool consumed; // true if the event has been handled (TODO: atomic 必要??)
+	int seqnum; // matches seqnum in the associated event
+	size_t len; // payload len in bytes
+	size_t size; // allocated space of the buffer (may be greater than len)
+	void * buf; // type inferred from event opcode
+} event_heap_entry_t; 
+
+static event_heap_entry_t event_heap[EVHEAP_LEN] = { 0 };
 
 /* FOR NEXT TIME!
  * - My order of development will be to "perfect" the event sending in the
@@ -67,6 +87,20 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler fo
  * consumed. Because we'll use a block, we can also increment events
  * sequentially. Unordered events may be dropped, and heap indexes less than the
  * current can be "garbage collected" if we determine the event was dropped.
+ *
+ *
+ * FOR NEXT TIME PT2:
+ * As I'm implementing the event heap, I'm realizing that the queue may be
+ * negligibly better, if at all. Essentally, the main goal is to create a
+ * convenient way to multithread publishes in a way that lets the single
+ * subscriber sleep in the interim.
+ *
+ * With the new heap system, that's basically exactly what this is. While
+ * sending the entire event header still seems a bit unnecessary, the 
+ * alternative idea *still* depends on sending on an internal socket to wake
+ * the subscriber thread. Since it's an internal FD anyway, the memory still
+ * fully belongs to this process, whether it contains meaningless eventfd bytes
+ * or an actual event header.
  */
 
 
@@ -74,7 +108,7 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler fo
 /* Send an event via the internal pipe, can be called by any thread, thus
  * the event fd needs to be protected with a lock. */
 // TODO: payload support
-int event_send(event_t * ev, bool try_again)
+int event_send_OLD(event_t * ev, bool try_again)
 {
 	const size_t len = sizeof(event_t);
 	int bytes_remaining;
@@ -93,6 +127,57 @@ int event_send(event_t * ev, bool try_again)
 
 	return bytes_remaining;
 }
+
+int event_send(event_t * ev, void * payload, size_t len)
+{
+	int seqnum;
+	void * heap_ref;
+	int bytes_remaining;
+
+	if (!(atomic_load(&ready))) {
+		LOG_WARN("drop event: fd not ready");
+		return -1;
+	}
+
+	/* Prepare the event */
+	if (ev->opcode >= __APP_CMD_MAX) {
+		// NOTE: I'm a bit iffy where this fits into my personal C coding style
+		// It technically breaks the "caller is responsible" rule as an interface
+		// function, but it is actively populating the event fields otherwise
+		LOG_ERRORF("ignore send event with invalid opcode %d", ev->opcode);
+		return -1;
+	}
+
+	if (!ev->timestamp) {
+		ev->timestamp = timestamp_now();
+	}
+
+	//
+
+	seqnum = atomic_fetch_add(&ev_counter, 1);
+	ev->seqnum = seqnum;
+
+	if (len && payload) {
+		if (!(heap_ref = get_payload_buffer(seqnum))) {
+			return -1;
+		}
+		memcpy(heap_ref, payload, len);
+	}
+
+	pthread_rwlock_rdlock(&fd_lock); // ensure event_fd is valid
+	bytes_remaining = io_write_msg(ctx.event_fd, ev, sizeof(event_t), try_again);
+	pthread_rwlock_unlock(&fd_lock);
+	if (bytes_remaining) {
+		LOG_ERRORF("incomplete event write: %s", app_cmd_to_str(ev->opcode));
+	}
+
+	return bytes_remaining;
+}
+
+// int event_send_payload(app_cmd_t opcode, void * payload, size_t len)
+// {
+	// event_t crate; // "prepare the crate for shipment"
+// }
 
 /* --- */
 
@@ -393,4 +478,62 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 		app_cmd_to_str(ev_buf.opcode), payload_len);
 
 	return 0;
+}
+
+/* Prepare a buffer in the event payload heap for the event we are about to
+ * send.
+ *
+ * NOTE: This function "can" be blocking in extreme cases. This is intentional
+ * as somewhat of a built in rate limit. Of course, if it is regularly
+ * blocking, then this is a sign of a much greater issue. Alas, we have few
+ * event payload slots because both simultaneous and events with payloads are
+ * rare. This function will spin on the shared buffer array """the heap"""
+ * until it finds a suitable spot.
+ *
+ * Conditions for such a spot are:
+ * - buffer is not locked but consumed (happy case!)
+ * - buffer is neither locked nor consumed, buffer seqnum is EVHEAP_LEN fewer
+ *   than the incoming seqnum (assumed the event was dropped in this case)
+ * (Buffer locked means we don't touch it.)
+ *
+ * This is also how the atomic boolean works in place of a mutex. Since we
+ * continue on a failed atomic_exchange, this is an active spin instead of sleep.
+ */
+void * get_payload_buffer(int seqnum)
+{
+	event_heap_entry_t * ref;
+
+	bool locked;
+	int idx = -1;
+
+	int lsn = 99999999; // lowest sequence number (TODO better init value)
+	int lsn_idx = 0;
+
+	// TODO: Is it worthwhile to preserve the last selected location to be
+	// a good starting point? Probably not?
+	
+	while (++idx >= 0) { // <== [[ while true ]]
+		ref = &event_heap[idx % EVHEAP_LEN]
+
+		if (ref->seqnum < lsn) {
+			lsn = ref->seqnum;
+			lsn_idx = idx;
+		}
+
+		locked = atomic_exchange(&ref->lock, true);
+		if (locked) {
+			// entry currently in use
+			continue;
+		}
+
+		if (idx < EVHEAP_LEN && atomic_load(&ref->consumed)) {
+			// good to go, lock and do stuff (TODO)
+		}
+		else if (idx > EVHEAP_LEN) {
+			// update idx and ref
+			// good to go if not locked (TODO)
+			// might spin after this?
+			// Do I have the lsn search stuff in the right order?
+		}
+	}
 }
