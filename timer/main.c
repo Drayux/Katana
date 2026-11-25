@@ -127,11 +127,10 @@ int main(int argc, char * argv[])
 			default:
 				LOG_ERRORF("Unsupported main loop event: %d", event_op);
 				continue;
+			case APP_CMD_NONE:
+				LOG_INFO("Empty cmd");
+				continue;
 
-			case APP_CMD_SCAN:
-				LOG_INFO("Receive scan");
-				/* TODO: try to resolve a command from the autosplitter */
-				break;
 			case APP_CMD_SPLIT:
 				LOG_INFO("Receive split");
 				break;
@@ -147,20 +146,16 @@ int main(int argc, char * argv[])
 				goto shutdown;
 		}
 
+		/* TODO: try to resolve a command from the autosplitter */
+
 		char * pl = event_ref_payload(&event);
 		if (pl) {
 			fprintf(stderr, "%s\n", pl);
 			event_unref_payload(&event);
 		}
 
-		// (placeholder, moved from OG main)
-		// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
-
 		// TODO: Maybe a temporary interface, shows the TUI prompt for now
-		// ALSO: It doesn't want to "work" more than once??
 		ui_notify();
-
-		// TODO: NULL_FREE(event->payload);
 	}
 
 shutdown:

@@ -15,6 +15,7 @@
 #include <linux/limits.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,9 +44,6 @@ static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
 static atomic_int ev_counter = 1000; // arbitrary, nonzero makes it easier to spot in logs
 // ^^ (unimportant) TODO: No overflow protection implemented yet
 
-static event_t * read_event(int recv_fd); /* message handler for event pipe */
-static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
-
 /* -- Event payload heap -- */
 
 #define EVHEAP_LEN 4
@@ -65,30 +63,20 @@ typedef struct {
 
 static event_heap_entry_t event_heap[EVHEAP_LEN] = { 0 };
 
-/* FOR NEXT TIME!
- * - Finally, I will implement the new version of the IPC handler (function
- *   skeleton in ipc_common.c) which accepts a connection in a detached thread.
- *   It will read in ipc_msg_t formatted messages and convert them into event_t
- *   structs and forward that to the event queue with the new methods in part 2
- *
- * For part one, I'm seeking to solve the case of the payload pointer. Few
- * internal events will need this (if any??) and it seems senseless to malloc
- * and free each time if it's a regular or semi-regular interval. Thus, I'm
- * considering an "event heap" of sorts in this file. Instead of a pointer,
- * an event would get a heap index. This heap would be reused as messages are
- * consumed. Because we'll use a block, we can also increment events
- * sequentially. Unordered events may be dropped, and heap indexes less than the
- * current can be "garbage collected" if we determine the event was dropped.
- */
+/* --- Static helpers --- */
 
+static event_t * read_event(int recv_fd); /* message handler for event pipe */
+static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
+static event_heap_entry_t * prepare_payload_buffer(void);
 
-event_heap_entry_t * prepare_payload_buffer(void);
+/* --- */
+
 
 /* Send an event via the internal pipe, can be called by any thread.
  * (Thus the event fd is protected with a lock.) */
 int event_send(event_t * ev, void * payload, size_t len)
 {
-	event_heap_entry_t * heap_ref;
+	event_heap_entry_t * heap_ref = NULL;
 	int seqnum;
 	int bytes_remaining;
 
@@ -107,7 +95,7 @@ int event_send(event_t * ev, void * payload, size_t len)
 	}
 
 	seqnum = atomic_fetch_add(&ev_counter, 1);
-	ev->seqnum = seqnum;
+	ev->_seqnum = seqnum;
 
 	if (!ev->timestamp) {
 		ev->timestamp = timestamp_now();
@@ -115,7 +103,9 @@ int event_send(event_t * ev, void * payload, size_t len)
 
 	if (len && payload) {
 		heap_ref = prepare_payload_buffer();
-
+	}
+	//
+	if (heap_ref) {
 		heap_ref->seqnum = seqnum;
 		heap_ref->consumed = false;
 
@@ -149,7 +139,7 @@ int event_send(event_t * ev, void * payload, size_t len)
 
 		if (heap_ref->buf) {
 			memcpy(heap_ref->buf, payload, len);
-			ev->payload = heap_ref - event_heap; // calc array index
+			ev->_payload = heap_ref - event_heap; // calc array index
 		}
 
 		atomic_store(&heap_ref->lock, false);
@@ -158,7 +148,7 @@ int event_send(event_t * ev, void * payload, size_t len)
 		 * the payload of this event. */
 	}
 	else {
-		ev->payload = -1;
+		ev->_payload = -1;
 	}
 
 	pthread_rwlock_rdlock(&fd_lock); // ensure event_fd is valid
@@ -184,19 +174,19 @@ void * event_ref_payload(event_t * ev)
 {
 	event_heap_entry_t * heap_ref;
 
-	if (ev->payload < 0 || ev->payload >= EVHEAP_LEN) {
+	if (ev->_payload < 0 || ev->_payload >= EVHEAP_LEN) {
 		return NULL;
 	}
 
-	heap_ref = &event_heap[ev->payload];
+	heap_ref = &event_heap[ev->_payload];
 
 	// spin until released, should be rare
 	while (!atomic_exchange(&heap_ref->lock, true));
 
-	if (heap_ref->seqnum != ev->seqnum) {
+	if (heap_ref->seqnum != ev->_seqnum) {
 		/* Stomped by a more recent event send */
 		atomic_store(&heap_ref->lock, false);
-		ev->payload = -1;
+		ev->_payload = -1;
 		return NULL;
 	}
 	else if (!heap_ref->buf) {
@@ -216,11 +206,12 @@ void event_unref_payload(event_t * ev)
 {
 	event_heap_entry_t * heap_ref;
 
-	if (ev->payload < 0 || ev->payload >= EVHEAP_LEN) {
+	if (ev->_payload < 0 || ev->_payload >= EVHEAP_LEN) {
 		return;
 	}
 
-	heap_ref = &event_heap[ev->payload];
+	heap_ref = &event_heap[ev->_payload];
+	heap_ref->consumed = true;
 	atomic_store(&heap_ref->lock, false);
 }
 
@@ -286,10 +277,13 @@ int event_poll(event_t * ev_out)
 	// lower-priority.
 
 	/* IPC SOCK */
+	/* Spawns a handler thread for the duration of the connection --
+	 * Valid events will be forwarded to the event pipe; some IPC functions
+	 * submit no events (for example, a "get_timer_state" request.) */
 	if (fds[1].revents) {
 		if (fds[1].revents & POLLIN) {
-			// ev_ref = ipc_handle(fds[1].fd, read_ipc_message);
-			LOG_WARN("Skipped IPC event while it's under construction");
+			ipc_handle(fds[1].fd, read_ipc_message);
+			return (int) APP_CMD_NONE; // 0
 		}
 		else {
 			// I don't expect to get here, but it seemed prudent to track
@@ -301,7 +295,7 @@ int event_poll(event_t * ev_out)
 		}
 	}
 	/* EV PIPE */
-	else if (fds[0].revents) {
+	if (fds[0].revents) {
 		if (fds[0].revents & POLLIN) {
 			ev_ref = read_event(fds[0].fd);
 		}
@@ -322,10 +316,14 @@ int event_poll(event_t * ev_out)
 
 	if (ev_ref) {
 		memcpy(ev_out, ev_ref, sizeof(event_t));
-		return (int) ev_ref->opcode;
 	}
-
-	return (int) APP_CMD_SCAN; // 0
+	else {
+		ev_out->timestamp = timestamp_now();
+		ev_out->opcode = APP_CMD_SCAN;
+		ev_out->_seqnum = -1;
+		ev_out->_payload = -1;
+	}
+	return (int) ev_ref->opcode;
 }
 
 /* Prepare event handler loop --
@@ -396,7 +394,99 @@ void event_shutdown(void)
 
 /* -- INTERNAL -- */
 
-// TODO: Payload support
+/* Prepare a buffer in the event payload heap for the event we are about to
+ * send.
+ *
+ * NOTE: This function "can" be blocking in extreme cases. This is intentional
+ * as somewhat of a built in rate limit. Of course, if it is regularly
+ * blocking, then this is a sign of a much greater issue. Alas, we have few
+ * event payload slots because both simultaneous and events with payloads are
+ * rare. This function will spin on the shared buffer array """the heap"""
+ * until it finds a suitable spot.
+ *
+ * Conditions for such a spot are:
+ * - buffer is not locked but consumed (happy case!)
+ * - buffer is neither locked nor consumed, buffer seqnum is EVHEAP_LEN fewer
+ *   than the incoming seqnum (assumed the event was dropped in this case)
+ * (Buffer locked means we don't touch it.)
+ *
+ * This is also how the atomic boolean works in place of a mutex. Since we
+ * continue on a failed atomic_exchange, this is an active spin instead of sleep.
+ *
+ * TODO: This entire logic works suspiciously well on first build. It certainly
+ * needs a lot more testing than I care to give it right now!! Mostly the race
+ * condition logic!
+ */
+static event_heap_entry_t * prepare_payload_buffer(void)
+{
+	event_heap_entry_t * ref;
+	event_heap_entry_t * lsn_ref = NULL; // lowest sequence number
+
+	bool locked;
+
+	/* Loop forever until we set an lsn_ref or the loop breaks from inside
+	 * AKA if all entries are locked out, we'll loop until one opens up, else
+	 * we'll break as soon as we see an open entry, or fall back to the oldest
+	 * unconsumed entry (that was unlocked.) */
+	for (int idx = 0; idx < EVHEAP_LEN || lsn_ref == NULL; ref = NULL) {
+		if (idx >= EVHEAP_LEN) {
+			if (idx == EVHEAP_LEN) {
+				/* Loop is now spinning until a buffer is unlocked, warn once */
+				LOG_DEBUG("evheap full: all entries locked");
+			}
+			sched_yield();
+			//
+			// TODO: For now, we'll give up after awhile
+			if (idx > 1000) {
+				return NULL;
+			}
+		}
+
+		ref = &event_heap[(idx++) % EVHEAP_LEN];
+		//
+		locked = atomic_exchange(&ref->lock, true);
+		if (locked) {
+			// LOG_DEBUGF("skip locked evheap entry %d", ref - event_heap);
+			continue;
+		}
+
+		/* Track the oldest event if we need it --
+		 * We'll hold the lock on the oldest one we find so it doesn't get
+		 * taken by another thread. */
+		if (!lsn_ref) {
+			lsn_ref = ref;
+		}
+		else if (ref->seqnum < lsn_ref->seqnum) {
+			atomic_store(&lsn_ref->lock, false);
+			lsn_ref = ref;
+		}
+
+		if (ref->buf && !ref->consumed) {
+			/* unconsumed event, skip on the first pass
+			 * (ref will become NULL if continue stops the loop) */
+			if (ref != lsn_ref) {
+				atomic_store(&ref->lock, false);
+			}
+			continue;
+		}
+
+		/* Found an empty candidate! Release the LSN entry we hoarded */
+		atomic_store(&lsn_ref->lock, false);
+		break;
+	}
+
+	/* Precautionary debug logging -- might become unnecessary once the code
+	 * is properly tested */
+	if (!ref) {
+		LOG_DEBUGF("evheap full: use oldest unconsumed payload %d [%d]",
+			lsn_ref->seqnum, lsn_ref - event_heap);
+	}
+	/* --- */
+
+	/* Fallback to use the oldest unconsumed event */
+	return ref ? ref : lsn_ref;
+}
+
 static event_t * read_event(int recv_fd)
 {
 	static io_buf_t * ev_buf = NULL;
@@ -529,74 +619,3 @@ static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
 	return 0;
 }
 
-/* Prepare a buffer in the event payload heap for the event we are about to
- * send.
- *
- * NOTE: This function "can" be blocking in extreme cases. This is intentional
- * as somewhat of a built in rate limit. Of course, if it is regularly
- * blocking, then this is a sign of a much greater issue. Alas, we have few
- * event payload slots because both simultaneous and events with payloads are
- * rare. This function will spin on the shared buffer array """the heap"""
- * until it finds a suitable spot.
- *
- * Conditions for such a spot are:
- * - buffer is not locked but consumed (happy case!)
- * - buffer is neither locked nor consumed, buffer seqnum is EVHEAP_LEN fewer
- *   than the incoming seqnum (assumed the event was dropped in this case)
- * (Buffer locked means we don't touch it.)
- *
- * This is also how the atomic boolean works in place of a mutex. Since we
- * continue on a failed atomic_exchange, this is an active spin instead of sleep.
- *
- * TODO: This entire logic works suspiciously well on first build. It certainly
- * needs a lot more testing than I care to give it right now!! Mostly the race
- * condition logic!
- */
-event_heap_entry_t * prepare_payload_buffer(void)
-{
-	event_heap_entry_t * ref;
-	event_heap_entry_t * lsn_ref = NULL; // lowest sequence number
-
-	bool locked;
-
-	/* Loop forever until we set an lsn_ref or the loop breaks from inside
-	 * AKA if all entries are locked out, we'll loop until one opens up, else
-	 * we'll break as soon as we see an open entry, or fall back to the oldest
-	 * unconsumed entry (that was unlocked.) */
-	for (int idx = 0; idx < EVHEAP_LEN || lsn_ref == NULL; ref = NULL) {
-		ref = &event_heap[idx++ % EVHEAP_LEN];
-
-		locked = atomic_exchange(&ref->lock, true);
-		if (locked) {
-			// entry currently in use
-			continue;
-		}
-
-		/* Track the oldest event if we need it
-		 * We'll hold the lock on the oldest one we find so it doesn't get
-		 * taken by another thread. */
-		if (!lsn_ref) {
-			lsn_ref = ref;
-		}
-		else if (ref->seqnum < lsn_ref->seqnum) {
-			atomic_store(&lsn_ref->lock, false);
-			lsn_ref = ref;
-		}
-
-		if (!ref->consumed) {
-			/* unconsumed event, skip on the first pass
-			 * (ref will be left as NULL if the loop exits) */
-			if (ref != lsn_ref) {
-				atomic_store(&ref->lock, false);
-			}
-			continue;
-		}
-
-		/* Found an empty candidate! Release the LSN entry we hoarded */
-		atomic_store(&lsn_ref->lock, false);
-		break;
-	}
-
-	/* Fallback to use the oldest unconsumed event */
-	return ref ? ref : lsn_ref;
-}

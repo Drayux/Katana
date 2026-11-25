@@ -11,11 +11,27 @@
 #define IO_BLOCK_SIZE 4096 /* Max size for a single I/O operation */
 // ^^ TODO: Consider using PIPE_BUF instead
 
+/* Secondary status tracking for io buffers:
+ * -- 0 on OK;
+ * -- negative on syscall fail (-errno);
+ * -- positive to track a cb-specific or unique state
+ *
+ * This will always be reset during a read or write operation. If a condition
+ * appears, it will be set before the callback handler, which may overwrite
+ * said status accordingly. */
+typedef enum {
+	IO_OK = 0,
+	// arbitrary-ish, reserve 1 <-> 127 for cb
+	IO_FULL = 128, /* no room left in this io_buf */
+	IO_PARTIAL = 129, /* more data required for a complete message */
+	IO_REPLY = 130, /* after a read, send the buffer back (IPC-specific code) */
+} io_buf_status_t;
+
 /* Structure for preserving partial message transmissions */
 typedef struct {
 	size_t const capacity; /* max number of bytes in buf */
 	size_t filled; /* number of preserved bytes in buf */
-	int status;
+	int status; /* io_buf_status_t (see comment by the enum) */
 	char _buf[];
 } io_buf_t;
 

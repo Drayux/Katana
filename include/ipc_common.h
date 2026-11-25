@@ -17,7 +17,8 @@
 /* Shared enum type between IPC and internal EVENT messages */
 typedef enum {
 	APP_CMD_ERROR = -1,
-	APP_CMD_SCAN = 0, // poll timeout (maybe, this is a TODO idea)
+	APP_CMD_NONE = 0, // poll timeout (maybe, this is a TODO idea)
+	APP_CMD_SCAN,
 	APP_CMD_QUIT,     // issues a quit command (might not exit right away)
 	APP_CMD_START,
 	APP_CMD_SPLIT,
@@ -31,7 +32,7 @@ typedef enum {
 } app_cmd_t;
 
 /* ^^ TODO -- considering the alternative:
-#define APP_CMD_SCAN 0
+#define APP_CMD_NONE 0
 #define APP_CMD_QUIT 1
 #define APP_CMD_START 2
 // ...
@@ -77,7 +78,7 @@ static inline char const * app_cmd_to_str(app_cmd_t cmd)
 	switch (cmd) {
 		case APP_CMD_ERROR:
 			return "ERROR";
-		case APP_CMD_SCAN:
+		case APP_CMD_NONE:
 			return "NONE";
 		case APP_CMD_QUIT:
 			return "QUIT";

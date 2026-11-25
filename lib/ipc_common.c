@@ -15,6 +15,12 @@
 
 static int send_fd = 0;
 
+struct conn_handle_args {
+	int sock_fd;
+	ipc_handler_t on_msg;
+};
+static int _conn_handle_loop(void * _args);
+
 // Creates a UNIX IPC socket where other processes can invoke katana commands
 int ipc_listen(void)
 {
@@ -62,38 +68,21 @@ int ipc_listen(void)
 
 /* Accepts a connection in a detached thread and passes any messages to the
  * specified command handler routine */
-// TODO: Very WIP function
 int ipc_handle(int sock_fd, ipc_handler_t on_msg)
 {
-	// Spawn a DETACHED thread
-	// ...
+	int status;
+	pthread_t handler_thread;
+	struct conn_handle_args args = {
+		.sock_fd = sock_fd,
+		.on_msg = on_msg,
+	};
 
-	// it accepts the connection
-	int client_fd;
-	// event_t * rval;
-	int rval;
-
-	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
-		if (client_fd < 0) {
-			// perror("accept fail");
-			LOG_ERROR("Failed accept incoming IPC conenction");
-		}
-		else {
-			LOG_ERROR("Invalid IPC client fd during accept");
-		}
-		return -1; // TODO: Revised error return
+	status = pthread_create(&handler_thread, NULL, &_conn_handle_loop, &args);
+	if (!status) {
+		status = pthread_detach(handler_thread);
 	}
 
-	rval = on_msg(NULL, client_fd);
-	
-	/* --- */
-
-	close(client_fd);
-	return rval;
-
-	// it loops on the connection, passing to on_msg
-	// ^^ loop handles the ipc_msg format..i.e. makes sure it sees a complete message
-	// ^^ loop may timeout unless it receives a keep-alive message
+	return status;
 }
 
 // Checks if the socket exists and connects to it if so. Returns socket fd on
@@ -249,3 +238,51 @@ int ipc_unlink_socket_path(void)
 	// }
 	// send_fd = fd;
 // }
+
+static void * _connection_handle_loop(void * _args)
+{
+	struct conn_handle_args const * args = _args;
+	int sock_fd = args->sock_fd;
+	ipc_handler_t on_msg = args->on_msg;
+
+	int client_fd;
+	io_buf_t * conn_buf = NULL;
+
+	// errno = 0;
+	if ((client_fd = accept(sock_fd, NULL, NULL)) <= STDERR_FILENO) {
+		if (client_fd < 0) {
+			// status = -errno;
+			// perror("accept fail");
+			LOG_ERROR("Failed accept incoming IPC conenction");
+		}
+		else {
+			LOG_ERROR("Invalid IPC client fd during accept");
+		}
+		return NULL;
+	}
+
+	conn_buf = io_buf_create(KATANA_IPC_MAX_PAYLOAD);
+	// ^^ TODO: This is plenty of space for now, but that may change
+
+	/* Loop on the connection, passing received bytes to on_msg */
+	// ^^ loop handles the ipc_msg format..i.e. makes sure it sees a complete message
+	// ^^ loop may timeout unless it receives a keep-alive message
+	while (!conn_buf->status) {
+		io_read(client_fd, conn_buf, on_msg, NULL);
+		if (conn_buf->status == IO_REPLY) {
+			io_write(client_fd, conn_buf, NULL, NULL);
+			// ^^ conn_buf->status is reset if this call succeeds
+		}
+	}
+
+	/* --- */
+
+	/* NOTE: No reporter for this thread since we don't expect it to last the
+	 * lifetime of the program */
+	LOG_INFOF("IPC connection exited with status %d", conn_buf->status);
+
+	DESTROY_FD(client_fd);
+	NULL_FREE(conn_buf);
+
+	return NULL;
+}

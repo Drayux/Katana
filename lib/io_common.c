@@ -50,11 +50,11 @@ int io_read(int recv_fd, io_buf_t * buf,
 
 	if (!buf) {
 		/* no room for a read */
-		// TODO: Use the new macros for interface function error values
-		return -1;
+		return -1; // TODO: Use new macros for interface function error values
 	}
 
 	msg_ptr = (char *) buf->_buf + buf->filled;
+	buf->status = (int) IO_OK; // 0
 
 	while ((read_len = buf->capacity - buf->filled) > 0) {
 		read_len = read_len < IO_BLOCK_SIZE ?
@@ -95,6 +95,9 @@ int io_read(int recv_fd, io_buf_t * buf,
 		buf->filled += bytes_read;
 	}
 
+	if (buf->capacity == buf->filled) {
+		buf->status = (int) IO_FULL;
+	}
 	cb_status = on_success ? on_success(buf) : 1;
 
 	/* Symmetry with on_fail: positive leaves read buf as-is so the caller may
@@ -134,7 +137,7 @@ int io_read_delim(int recv_fd, char delim, io_buf_t * buf,
 	delim_ptr = memchr(buf->_buf, delim, buf->filled);
 	if (!delim_ptr) {
 		/* Partial read, neither success_cb nor fail_cb should be called */
-		buf->status = 1; // TODO: Need better definitions for these
+		buf->status = (int) IO_PARTIAL;
 		return buf->filled;
 	}
 
@@ -195,6 +198,7 @@ int io_write(int send_fd, io_buf_t * buf,
 	}
 
 	msg_ptr = (char *) buf->_buf;
+	buf->status = (int) IO_OK; // 0
 
 	while ((send_len = buf->filled - total_sent) > 0) {
 		send_len = send_len < IO_BLOCK_SIZE ?
@@ -259,7 +263,7 @@ int io_write(int send_fd, io_buf_t * buf,
 
 int io_read_msg(int recv_fd, void * buf, size_t len, bool try_again)
 {
-	// TODO
+	// TODO (actually I may have no use for this at all)
 	return -1;
 }
 
