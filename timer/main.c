@@ -147,6 +147,12 @@ int main(int argc, char * argv[])
 				goto shutdown;
 		}
 
+		char * pl = event_ref_payload(&event);
+		if (pl) {
+			fprintf(stderr, "%s\n", pl);
+			event_unref_payload(&event);
+		}
+
 		// (placeholder, moved from OG main)
 		// pthread_create(&t1, NULL, &ls_auto_splitter, NULL);
 

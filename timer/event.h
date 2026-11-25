@@ -12,10 +12,10 @@ typedef struct {
 	int payload; // -1 if none, else an event heap index (interal to event.c)
 } event_t;
 
-int event_send_OLD(event_t * ev, bool try_again);
-
 int event_send(event_t * ev, void * payload, size_t len);
 int event_send_cmd(app_cmd_t opcode);
+void * event_ref_payload(event_t * ev);
+void event_unref_payload(event_t * ev);
 //
 /* Optional event initializer. Not hurtful to have, but the main use case was
  * for the event queue idea which would have been called internally as a copy

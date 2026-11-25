@@ -228,8 +228,8 @@ static int handle_wake(void)
 /* Return non-zero if the UI should stop (due to an error or user request) */
 static int handle_key(int x)
 {
-	event_t ev = { 0 }; // TODO
-
+	char * pl; // TODO testing only
+	event_t crate; // TODO testing only
 	switch (x) {
 		case KEY_RESIZE:
 			LOG_DEBUG("Invoke layout resize");
@@ -242,14 +242,26 @@ static int handle_key(int x)
 		case KEY_ENTER:
 			LOG_DEBUG("Invoke split");
 
-			ev.opcode = APP_CMD_SPLIT;
-			event_send(&ev, true);
+			// event_send_cmd(APP_CMD_SPLIT);
+			// --- testing
+			pl = "itchy balls";
+			crate.opcode = APP_CMD_SPLIT;
+			crate.payload = -1;
+			event_send(&crate, pl, strlen(pl) + 1);
+			// ---
 			break;
 
 		case '\b':
 		case 127:
 		case KEY_BACKSPACE:
 			LOG_DEBUG("Invoke <backspace action>");
+
+			// --- testing
+			pl = "super duper califragilistic balls";
+			crate.opcode = APP_CMD_LOAD;
+			crate.payload = -1;
+			event_send(&crate, pl, strlen(pl) + 1);
+			// ---
 			break;
 
 			
@@ -268,8 +280,7 @@ static int handle_key(int x)
 		case 'q':
 			LOG_DEBUG("Invoke quit action");
 
-			ev.opcode = APP_CMD_QUIT;
-			event_send(&ev, true);
+			event_send_cmd(APP_CMD_QUIT);
 			break;
 
 			/* NOTE / TODO: My original code was to hint to the UI early that
