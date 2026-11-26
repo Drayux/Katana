@@ -246,7 +246,7 @@ static int handle_key(int x)
 			// --- testing
 			pl = "itchy balls";
 			crate.opcode = APP_CMD_SPLIT;
-			crate.payload = -1;
+			crate._payload = -1;
 			event_send(&crate, pl, strlen(pl) + 1);
 			// ---
 			break;
@@ -259,7 +259,7 @@ static int handle_key(int x)
 			// --- testing
 			pl = "super duper califragilistic balls";
 			crate.opcode = APP_CMD_LOAD;
-			crate.payload = -1;
+			crate._payload = -1;
 			event_send(&crate, pl, strlen(pl) + 1);
 			// ---
 			break;

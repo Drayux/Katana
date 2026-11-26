@@ -1,11 +1,11 @@
 #include "ipc_common.h"
 
 #include "environment.h"
-#include "io_common.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
 #include <linux/limits.h>
+#include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,9 +17,9 @@ static int send_fd = 0;
 
 struct conn_handle_args {
 	int sock_fd;
-	ipc_handler_t on_msg;
+	io_handler_t on_msg;
 };
-static int _conn_handle_loop(void * _args);
+static void * _conn_handle_loop(void * _args);
 
 // Creates a UNIX IPC socket where other processes can invoke katana commands
 int ipc_listen(void)
@@ -68,7 +68,7 @@ int ipc_listen(void)
 
 /* Accepts a connection in a detached thread and passes any messages to the
  * specified command handler routine */
-int ipc_handle(int sock_fd, ipc_handler_t on_msg)
+int ipc_handle(int sock_fd, io_handler_t on_msg)
 {
 	int status;
 	pthread_t handler_thread;
@@ -145,8 +145,7 @@ int ipc_send(ipc_msg_t * msg, bool try_again)
 		return -1;
 	}
 
-	// proxy.ts = htonll(msg->ts); // TODO!!!
-	proxy.ts = msg->ts;
+	// proxy.ts = msg->ts; // TODO (ts_upper / ts_lower)
 	proxy.op = htons(msg->op);
 	proxy.len = htons(msg->len);
 
@@ -170,7 +169,7 @@ int ipc_send(ipc_msg_t * msg, bool try_again)
 	if (status == 0) {
 		if (msg->len > 0) {
 			/* Write just the payload */
-			status = io_write_msg(send_fd, msg->buf, msg->len, try_again);
+			status = io_write_msg(send_fd, msg->_buf, msg->len, try_again);
 		}
 	}
 
@@ -226,24 +225,27 @@ int ipc_unlink_socket_path(void)
 	return rval;
 }
 
-/* Simple setter for the FD that should be used for IPC communcation.
- * In essence, this would be called after ipc_connect for any secondary tool
- * to interfce with the timer, or after event_server_init by the main program
- * for the other threads to interact with the main thread. */
-// void ipc_set_send_fd(int fd)
-// {
-	// if (send_fd > STDERR_FILENO) {
-		// LOG_ERROR("Overwriting existing send fd");
-		// close(send_fd);
-	// }
-	// send_fd = fd;
-// }
-
-static void * _connection_handle_loop(void * _args)
+/* This function is meant to be general form for most any IPC -- notably,
+ * katana interally uses an event_t struct which needn't be exposed outside of
+ * that.
+ *
+ * This handler is meant to read from a connection for as long as it is open
+ * and not requesting a graceful exit (latter part TODO!)
+ *
+ * It uses katana's (aka my) IO interface, so the handler passed to this thread
+ * determines how this thread behaves. Notably, the unparsed io_buf will be
+ * passed to the handler. The handler may preserve and extract from this buf as
+ * it pleases.
+ *
+ * If the thread should reply, the handler should exclusively populate the
+ * IO buffer with the message to write, and set the buffer status to IO_REPLY.
+ *
+ * (TODO: probably more important stuff to document) */
+static void * _conn_handle_loop(void * _args)
 {
 	struct conn_handle_args const * args = _args;
 	int sock_fd = args->sock_fd;
-	ipc_handler_t on_msg = args->on_msg;
+	io_handler_t on_msg = args->on_msg;
 
 	int client_fd;
 	io_buf_t * conn_buf = NULL;

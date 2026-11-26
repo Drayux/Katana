@@ -31,6 +31,27 @@ io_buf_t * io_buf_create(size_t capacity)
 	return rval;
 }
 
+/* Drain a specified number of bytes from the io buffer into out_buf, NULL OK
+ * -- returns length of bytes drained
+ *
+ * Caller should assert that out_buf can store len bytes */
+size_t io_drain(char * out_buf, io_buf_t * io_buf, size_t len)
+{
+	size_t const drain_len = (len > io_buf->filled) ?
+		io_buf->filled : len;
+
+	if (out_buf) {
+		memcpy(out_buf, io_buf->_buf, drain_len);
+	}
+
+	io_buf->filled -= drain_len;
+	if (io_buf->filled > 0) {
+		memmove(io_buf->_buf, io_buf->_buf + drain_len, io_buf->filled);
+	}
+
+	return drain_len;
+}
+
 /* Returns leftover bytes in buffer (read_len on success if no handler given)
  * - Caller asserts send_fd is valid
  *
@@ -160,10 +181,7 @@ int io_read_delim(int recv_fd, char delim, io_buf_t * buf,
 	}
 	else if (!cb_status) {
 		/* Drop only what was extracted */
-		buf->filled -= msg_len + 1;
-		if (buf->filled > 0) {
-			memmove(buf->_buf, delim_ptr + 1, buf->filled);
-		}
+		io_drain(NULL, buf, msg_len + 1);
 	}
 	// else { /* Leave buffer untouched */ }
 

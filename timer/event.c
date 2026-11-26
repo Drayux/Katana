@@ -30,27 +30,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-static struct {
-	int pipe_fd; // listen
-	int sock_fd; // listen
-	int event_fd; // write
-} ctx;
-
-/* Initialization protection as it is possible that a publisher thread is fully
- * initialized before the event consumer loop. */
-static atomic_bool ready = false;
-static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
-
-static atomic_int ev_counter = 1000; // arbitrary, nonzero makes it easier to spot in logs
-// ^^ (unimportant) TODO: No overflow protection implemented yet
-
 /* -- Event payload heap -- */
-
 #define EVHEAP_LEN 4
-
-// #define EVHEAP_STATE_NEW (1)
-// #define EVHEAP_STATE_BORROW (-1)
-// #define EVHEAP_STATE_RELEASE (0) // not in use; won't be in use
 
 typedef struct {
 	atomic_bool lock; // prevent two threads from using the same entry
@@ -63,13 +44,27 @@ typedef struct {
 
 static event_heap_entry_t event_heap[EVHEAP_LEN] = { 0 };
 
-/* --- Static helpers --- */
+static struct {
+	int pipe_fd; // listen
+	int sock_fd; // listen
+	int event_fd; // write
+} ctx;
 
+/* --- Static helpers --- */
 static event_t * read_event(int recv_fd); /* message handler for event pipe */
-static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd); /* message handler for ipc sock */
+static int read_ipc_msg(io_buf_t * const buf); /* message cb for ipc sock */
 static event_heap_entry_t * prepare_payload_buffer(void);
 
 /* --- */
+
+/* Initialization protection as it is possible that a publisher thread is fully
+ * initialized before the event consumer loop. */
+static atomic_bool ready = false;
+static pthread_rwlock_t fd_lock = PTHREAD_RWLOCK_INITIALIZER;
+
+static atomic_int ev_counter = 1000; // arbitrary, nonzero makes it easier to spot in logs
+// ^^ (unimportant) TODO: No overflow protection implemented yet
+static io_buf_t * ev_read_buf = NULL;
 
 
 /* Send an event via the internal pipe, can be called by any thread.
@@ -242,8 +237,7 @@ int event_poll(event_t * ev_out)
 			.events = POLLIN
 		},
 	};
-	// int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
-	int const num_fds = 1; // TODO: ipc disabled for now
+	int const num_fds = (ctx.sock_fd > STDERR_FILENO) ? 2 : 1;
 
 	/* Waits for something to read */
 	// TODO consider using ppoll here to support a high refresh rate
@@ -282,7 +276,7 @@ int event_poll(event_t * ev_out)
 	 * submit no events (for example, a "get_timer_state" request.) */
 	if (fds[1].revents) {
 		if (fds[1].revents & POLLIN) {
-			ipc_handle(fds[1].fd, read_ipc_message);
+			ipc_handle(fds[1].fd, read_ipc_msg);
 			return (int) APP_CMD_NONE; // 0
 		}
 		else {
@@ -489,19 +483,19 @@ static event_heap_entry_t * prepare_payload_buffer(void)
 
 static event_t * read_event(int recv_fd)
 {
-	static io_buf_t * ev_buf = NULL;
 	static event_t new_ev;
 
 	int len; // len because we have no on_message CB to io_read()
 
-	// TODO: This won't be freed at program exit in the current form. Clean up
-	// after testing (or refactoring to the queue system.)
-	if (!ev_buf) {
-		ev_buf = io_buf_create(sizeof(event_t));
+	/* Reuse a single global buffer to save some load on the heap */
+	if (!ev_read_buf) {
+		if (!(ev_read_buf = io_buf_create(sizeof(event_t)))) {
+			return NULL;
+		}
 	}
 
 	/* Prefer io_read as pipe writes are atomic under PIPE_LEN bytes */
-	len = io_read(recv_fd, ev_buf, NULL, NULL);
+	len = io_read(recv_fd, ev_read_buf, NULL, NULL);
 	if (len < 0) {
 		// error logged by internal func
 		return NULL;
@@ -519,103 +513,75 @@ static event_t * read_event(int recv_fd)
 		// keep going
 	}
 
-	memcpy(&new_ev, ev_buf->_buf, sizeof(event_t));
-	ev_buf->filled = 0;
+	memcpy(&new_ev, ev_read_buf->_buf, sizeof(event_t));
+	ev_read_buf->filled = 0;
 
 	// TODO: This value has a dubiously limited lifetime (currently static)
+	// (Compatible with my current implementation, but it could cause trouble
+	// if I forget this and change how I use this later on.)
 	return &new_ev;
 }
 
-// NEW STUFF! This should become the callback routine used by the handler
-/* Read an IPC message from an FD, convert into an event_t. */
-static int read_ipc_msg(ipc_msg_t * msg_ref, int send_fd)
+/* >> io_handler_t function signature << */
+// TODO: this needs some sort of timeout / too many tries mechanism
+static int read_ipc_msg(io_buf_t * const buf)
 {
-	static ipc_msg_t cmd_buf;
-	static event_t ev_buf;
+	ipc_msg_t inc_msg_hdr = { 0 }; // incoming IPC message
+	ipc_msg_t * inc_msg_full = NULL;
+	event_t out_ev = { 0 }; // outgoing (parsed) app event
 
-	uint8_t * payload_buf = NULL;
-	ssize_t payload_len = 0;
+	uint16_t payload_len;
+	size_t total_len;
 
-	ssize_t bytes_read = 0;
-	ssize_t total_read = 0;
+	uint64_t timestamp;
 
-	// bytes_read = read(recv_fd, (uint8_t *) &cmd_buf, sizeof(ipc_msg_t));
-	if (!bytes_read) {
-		/* connection closed immediately */
-		LOG_DEBUG("File closed before read");
+	if (buf->filled < sizeof(ipc_msg_t)) {
+		/* Persist buffer, try again (unless buf->status is no longer OK) */
+		return 1;
+	}
+
+	memcpy(&inc_msg_hdr, buf->_buf, sizeof(ipc_msg_t)); 
+	payload_len = ntohs(inc_msg_hdr.len);
+	total_len = sizeof(ipc_msg_t) + payload_len;
+
+	if (total_len > KATANA_IPC_MAX_PAYLOAD) {
+		LOG_WARNF("incoming IPC message reported length is too large %ul",
+			total_len);
+		/* Drain the entire buffer */
+		// MAYBE TODO: Drain just this message? Hard to know how much is bad.
 		return -1;
 	}
-	else if (bytes_read < 0) {
-		switch (errno) {
-			case EINTR:
-			case EAGAIN:
-				/* Try again */
-				// TOOD: Hopefully this becomes a stack-friendly tail recursion
-				// return read_ipc_msg(recv_fd);
-				return -1;
-		}
-		// perror("read");
-		LOG_DEBUG("Unexpected error during IPC read");
-		return -1;
+	else if (buf->filled < total_len) {
+		// TODO: Not an issue for now, but if I expand the maximum length of
+		// an IPC message, this may cap out the buffer before we can reach the
+		// total length.
+
+		/* Message waiting on more data */
+		return 1;
 	}
 
-	// payload_len = (ssize_t) ntohs(cmd_buf.len);
-	payload_len = 0;
+	inc_msg_full = alloca(total_len);
+	ASSERT_ALLOC(inc_msg_full, 1);
 
-	do {
-		if (!payload_len) {
-			break;
-		}
-		else if (payload_len > KATANA_IPC_MAX_PAYLOAD) {
-			LOG_WARNF("IPC reported payload %ld exceeds maximum %u",
-				payload_len, KATANA_IPC_MAX_PAYLOAD);
-			payload_len = -1;
-			break;
-		}
+	io_drain((char *) inc_msg_full, buf, total_len);
 
-		payload_buf = malloc(payload_len);
-		if (!payload_buf) {
-			LOG_ERROR("No memory for IPC payload");
-			break;
-		}
+	// TODO: Check the opcode for a status check or if there's actually an
+	// event to send (branch the following)
 
-		while (total_read < payload_len) {
-			// TODO: I probably want the same error checking above?
-			// bytes_read = read(recv_fd, payload_buf, payload_len - total_read);
-			if (!bytes_read) {
-				break; // inner
-			}
-			else if (bytes_read < 0) {
-				switch (errno) {
-					case EINTR:
-					case EAGAIN:
-						continue;
-				}
-				break; // inner
-			}
-			total_read += bytes_read;
-		}
+	timestamp = (uint64_t) ntohl(inc_msg_full->ts_upper);
+	timestamp = timestamp << 32;
+	timestamp += (uint64_t) ntohl(inc_msg_full->ts_lower);
+	//
+	out_ev.timestamp = (timestamp_t) timestamp;
+	out_ev.opcode = ntohs(inc_msg_full->op);
+
+	if (payload_len > 0) {
+		event_send(&out_ev, inc_msg_full->_buf, payload_len);
 	}
-	while (false);
-
-	if (total_read != payload_len) {
-		LOG_WARNF("Incomplete IPC message: "
-			"%ld bytes read does not match %ld expected",
-			total_read, payload_len);
-		free(payload_buf);
-		payload_buf = NULL;
-		payload_len = -1; // indicates an error occurred
+	else {
+		event_send(&out_ev, NULL, 0);
 	}
 
-	// ev_buf.timestamp = ntohll(cmd_buf.ts); // TODO!!!
-	// ev_buf.timestamp = cmd_buf.ts;
-	ev_buf.opcode = ntohs(cmd_buf.op);
-	// ev_buf.len = payload_len;
-	// ev_buf.payload = payload_buf; // NULL OK; event_poll caller releases
-
-	LOG_DEBUGF("New event received: %s (%ld bytes)",
-		app_cmd_to_str(ev_buf.opcode), payload_len);
-
-	return 0;
+	/* Drained by us, so leave the rest of the stream untouched */
+	return 1;
 }
-

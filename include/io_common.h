@@ -45,6 +45,8 @@ typedef int (* io_msg_handler_t) (char const * msg, size_t len);
 io_buf_t * io_buf_create(size_t capacity);
 // ^^ destroyed with free(io_buf)
 
+size_t io_drain(char * out_buf, io_buf_t * io_buf, size_t len);
+
 /* Fills the io_buf with as many bytes can be read in one pass */
 int io_read(int recv_fd, io_buf_t * buf,
 	io_handler_t on_msg, io_handler_t on_fail);

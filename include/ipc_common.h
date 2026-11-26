@@ -6,6 +6,7 @@
  * main program hosts a server. */
 
 #include "common.h"
+#include "io_common.h"
 #include "timer_common.h"
 
 #include <stddef.h>
@@ -39,19 +40,19 @@ typedef enum {
 typedef uint16_t app_cmd_t
  */
 
-/* IPC event struct -- Katana converts this into an event_t after read. */
+/* IPC event struct -- Katana converts this into an event_t after read.
+ * Members of this struct will be in network byte order. */
 typedef struct __attribute__((__packed__)) {
-	timestamp_t ts;
+	uint32_t ts_upper; // timestamp most significant 4 bytes
+	uint32_t ts_lower; // ^^ ----- least significant 4 bytes
 	uint16_t op; // app_cmd_t
 	uint16_t len;
 	//
-	uint8_t buf[];
+	uint8_t _buf[];
 } ipc_msg_t;
 
-typedef int (* ipc_handler_t) (ipc_msg_t * msg, int send_fd);
-
 int ipc_listen(void);
-int ipc_handle(int sock_fd, ipc_handler_t on_msg); /* incoming connection handler */
+int ipc_handle(int sock_fd, io_handler_t on_msg); /* incoming connection handler */
 int ipc_connect(void);
 int ipc_send(ipc_msg_t * msg, bool try_again); // TODO: ipc refactor
 char * ipc_get_socket_path(void);
